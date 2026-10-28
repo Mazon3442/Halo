@@ -1,0 +1,12 @@
+# Rust / Tauri build output
+/target
+
+# Local ffmpeg binaries (each >200 MB, over GitHub's 100 MB file limit).
+# Place ffmpeg.exe and ffprobe.exe here for local builds; fetch them from
+# https://www.gyan.dev/ffmpeg/builds/ instead of committing them.
+/ffmpeg/*.exe
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.log

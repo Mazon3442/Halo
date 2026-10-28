@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halo</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="icon" href="/favicon.png">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m8.5 12 2.5 2.5 4.5-5"/></symbol>
+  <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-cc" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10.5 10.2a2.5 2.5 0 1 0 0 3.6"/><path d="M17 10.2a2.5 2.5 0 1 0 0 3.6"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></symbol>
+  <symbol id="i-compare" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 3v18"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></symbol>
+  <symbol id="i-magnet" viewBox="0 0 24 24"><path d="M6 4h4v9a2 2 0 0 0 4 0V4h4v9a6 6 0 0 1-12 0z"/><path d="M6 8h4M14 8h4"/></symbol>
+  <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88"/><path d="M14.47 14.48 20 20"/><path d="M8.12 8.12 12 12"/></symbol>
+  <symbol id="i-merge" viewBox="0 0 24 24"><path d="M3 12h6m-3-3 3 3-3 3"/><path d="M21 12h-6m3-3-3 3 3 3"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></symbol>
+  <symbol id="i-zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6M8 11h6"/></symbol>
+  <symbol id="i-zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M8 11h6"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.7-1.3-.7-2.2 0-.9.7-1.6 1.6-1.6H17a4 4 0 0 0 4-4c0-4.7-4-8.6-9-8.6z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10.5" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7.5" r="1.2" fill="currentColor"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+</svg>
+
+<div class="app">
+  <header class="topbar">
+    <div class="left">
+      <button class="brand" id="home-btn" title="Back to start (Ctrl+W)"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="mark-ring" x1="0.15" y1="0.1" x2="0.85" y2="0.95"><stop offset="0" stop-color="#7cc4ff"/><stop offset=".45" stop-color="#a98bff"/><stop offset=".8" stop-color="#ff8a6b"/><stop offset="1" stop-color="#ffc56b"/></linearGradient></defs><circle cx="32" cy="32" r="23" fill="none" stroke="url(#mark-ring)" stroke-width="9"/><circle cx="32" cy="32" r="10" fill="#f4f6f8"/></svg>Halo</button>
+      <span class="doc-name" id="doc-name"></span>
+      <span class="save-state" id="save-state" role="status" aria-live="polite"></span>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Workspace" id="tabs" hidden>
+      <button class="tab" role="tab" id="tab-background" data-tab="background" aria-controls="panel-background" aria-selected="true">
+        <svg class="icon" aria-hidden="true"><use href="#i-person"/></svg>Background<span class="dot" id="background-dot" hidden title="Effect on"></span>
+      </button>
+      <button class="tab" role="tab" id="tab-captions" data-tab="captions" aria-controls="panel-captions" aria-selected="false">
+        <svg class="icon" aria-hidden="true"><use href="#i-cc"/></svg>Captions<span class="dot" id="captions-dot" hidden title="Captions added"></span>
+      </button>
+      <button class="tab" role="tab" id="tab-color" data-tab="color" aria-controls="panel-color" aria-selected="false">
+        <svg class="icon" aria-hidden="true"><use href="#i-palette"/></svg>Color<span class="dot" id="color-dot" hidden title="Graded"></span>
+      </button>
+    </div>
+    <div class="right">
+      <button class="export-pill" id="export-pill" hidden title="Show export progress">
+        <span id="pill-text">Exporting</span><span class="meter"><div id="pill-bar"></div></span>
+      </button>
+      <button class="btn ghost icon-only" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" hidden><svg class="icon"><use href="#i-undo"/></svg></button>
+      <button class="btn ghost icon-only" id="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" hidden><svg class="icon"><use href="#i-redo"/></svg></button>
+      <button class="btn ghost icon-only" id="shortcuts-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="icon"><use href="#i-keyboard"/></svg></button>
+      <button class="btn primary" id="export-btn" hidden title="Export (Ctrl+E)"><svg class="icon"><use href="#i-export"/></svg>Export</button>
+    </div>
+  </header>
+
+  <main class="home" id="home">
+    <button class="open-card" id="open-card">
+      <span class="big-icon"><svg class="icon" aria-hidden="true"><use href="#i-film"/></svg></span>
+      <h1>Open a video</h1>
+      <p>Choose a file or drop it anywhere on this window. Halo keeps your edits for each video and picks up where you left off.</p>
+      <span class="btn primary" aria-hidden="true"><svg class="icon"><use href="#i-folder"/></svg>Choose video</span>
+      <span class="hint">Ctrl+O</span>
+    </button>
+    <section class="recents" aria-labelledby="recents-title">
+      <h2 id="recents-title">Recent</h2>
+      <div class="recent-list" id="recent-list"></div>
+    </section>
+  </main>
+
+  <main class="workspace" id="editor" hidden>
+    <aside class="sidebar">
+      <section class="scroll" id="panel-background" role="tabpanel" aria-labelledby="tab-background">
+        <div class="group">
+          <div class="group-title">Effect</div>
+          <div class="segmented" role="radiogroup" aria-label="Background effect">
+            <input type="radio" name="mode" id="m-none" value="none"><label for="m-none">None</label>
+            <input type="radio" name="mode" id="m-blur" value="blur"><label for="m-blur">Blur</label>
+            <input type="radio" name="mode" id="m-remove" value="remove"><label for="m-remove">Remove</label>
+            <input type="radio" name="mode" id="m-color" value="color"><label for="m-color">Color</label>
+          </div>
+          <p class="hint" id="mode-hint"></p>
+        </div>
+        <div class="group" id="blur-group">
+          <div class="group-title"><label for="blur">Strength</label><span class="value" id="blur-value"></span></div>
+          <input type="range" id="blur" min="4" max="60" step="1">
+        </div>
+        <div class="group" id="color-group">
+          <div class="group-title">Color</div>
+          <div class="field-row">
+            <div class="swatches" id="swatches">
+              <button class="swatch" data-color="#00b140" style="background:#00b140" aria-label="Green screen"></button>
+              <button class="swatch" data-color="#0047bb" style="background:#0047bb" aria-label="Blue screen"></button>
+              <button class="swatch" data-color="#000000" style="background:#000000" aria-label="Black"></button>
+              <button class="swatch" data-color="#ffffff" style="background:#ffffff" aria-label="White"></button>
+            </div>
+            <input type="color" id="color" aria-label="Custom color">
+            <input type="text" class="input" id="color-hex" maxlength="7" spellcheck="false" aria-label="Hex color" style="width:84px">
+          </div>
+        </div>
+        <div class="note" id="preview-note">Pause anywhere to see the effect on that frame. Hold <span class="kbd">C</span> to compare with the original.</div>
+      </section>
+
+      <section class="scroll" id="panel-captions" role="tabpanel" aria-labelledby="tab-captions" hidden>
+        <div class="group">
+          <div class="group-title">Transcribe</div>
+          <div id="speech-missing" hidden>
+            <p class="hint" id="speech-missing-text">Captions use two models that run on this PC: one hears the words, one times each word exactly. It's a one-time download of up to 670 MB.</p>
+            <button class="btn wide" id="speech-download" style="margin-top:10px">Download speech models</button>
+          </div>
+          <div id="speech-downloading" hidden>
+            <p class="hint" id="speech-progress-text">Starting download…</p>
+            <div class="progress" style="margin-top:8px"><div id="speech-bar"></div></div>
+          </div>
+          <div class="group" id="speech-ready" hidden>
+            <div class="field">
+              <label for="language">Spoken language</label>
+              <select id="language">
+                <option value="auto">Detect automatically</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="pt">Portuguese</option>
+                <option value="it">Italian</option>
+                <option value="nl">Dutch</option>
+                <option value="pl">Polish</option>
+                <option value="tr">Turkish</option>
+                <option value="ru">Russian</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="zh">Chinese</option>
+                <option value="hi">Hindi</option>
+                <option value="ar">Arabic</option>
+              </select>
+            </div>
+            <button class="btn wide" id="transcribe"><svg class="icon"><use href="#i-mic"/></svg><span id="transcribe-label">Generate captions</span></button>
+            <p class="hint" id="transcribe-status" role="status" aria-live="polite" hidden></p>
+            <p class="hint" id="captions-empty-hint">No captions yet — generate one, or import an SRT file.</p>
+          </div>
+        </div>
+        <div class="group" id="layout-group" hidden>
+          <div class="group-title"><label for="per-line">Words per caption</label><span class="value" id="per-line-value"></span></div>
+          <input type="range" id="per-line" min="1" max="7" step="1">
+        </div>
+        <div class="group" id="lines-group" hidden>
+          <div class="group-title"><span>Captions</span><span id="lines-count"></span></div>
+          <div class="lines" id="lines"></div>
+        </div>
+        <div class="group" id="cleanup-group">
+          <div class="group-title">Clean up</div>
+          <div class="field">
+            <div class="field-row">
+              <input type="text" id="fr-find" class="input" placeholder="Word Whisper got wrong" aria-label="Find a word to replace" style="flex:2; min-width:0">
+              <input type="text" id="fr-replace" class="input" placeholder="Replacement" aria-label="Replacement for the found word" style="flex:2; min-width:0">
+              <button class="btn" id="fr-replace-all">Replace all</button>
+            </div>
+            <p class="hint" id="fr-count" role="status" aria-live="polite"></p>
+          </div>
+          <button class="btn wide" id="clean-filler">Remove filler words</button>
+          <button class="btn wide" id="import-srt">Import SRT…</button>
+          <input type="file" id="import-srt-file" accept=".srt,text/plain" hidden>
+        </div>
+      </section>
+
+      <section class="scroll" id="panel-color" role="tabpanel" aria-labelledby="tab-color" hidden>
+        <div class="group">
+          <div class="group-title"><span>Section</span><span id="grade-where"></span></div>
+          <p class="hint" id="grade-hint"></p>
+          <div class="field-row">
+            <button class="btn" id="grade-add" style="flex:1"><svg class="icon"><use href="#i-plus"/></svg><span id="grade-add-label">Grade the whole video</span></button>
+          </div>
+          <div class="field-row" id="grade-tools">
+            <button class="btn" id="grade-split" style="flex:1" title="Split this section at the playhead"><svg class="icon"><use href="#i-scissors"/></svg>Split at playhead</button>
+            <button class="btn" id="grade-delete" title="Remove this section's grade"><svg class="icon"><use href="#i-trash"/></svg>Remove</button>
+          </div>
+        </div>
+
+        <div id="grade-editor">
+          <div class="group">
+            <div class="group-title"><span>Looks</span><span id="grade-look-name"></span></div>
+            <div class="looks" id="looks" role="list"></div>
+            <div class="field-row">
+              <button class="btn" id="grade-save" style="flex:1">Save look…</button>
+              <button class="btn" id="grade-import" style="flex:1"><svg class="icon"><use href="#i-upload"/></svg>Import…</button>
+              <input type="file" id="grade-import-file" accept=".cube,.xmp" multiple hidden>
+            </div>
+            <p class="hint">Import a .cube LUT from Premiere, Resolve, Final Cut or CapCut, or a Lightroom preset (.xmp).</p>
+          </div>
+
+          <div class="group">
+            <div class="group-title">LUT</div>
+            <div class="field-row">
+              <select id="grade-lut" aria-label="LUT" style="flex:1; min-width:0"></select>
+            </div>
+            <div class="slider-row" id="grade-lut-amount-row">
+              <label for="grade-lutAmount">Intensity</label>
+              <input type="range" id="grade-lutAmount" data-key="lutAmount" min="0" max="100" step="1">
+              <span class="value" id="grade-lutAmount-v"></span>
+            </div>
+          </div>
+
+          <div class="group">
+            <div class="group-title">Light</div>
+            <div class="slider-row"><label for="grade-exposure">Exposure</label><input type="range" id="grade-exposure" data-key="exposure" data-scale="0.01" min="-300" max="300" step="5"><span class="value" id="grade-exposure-v"></span></div>
+            <div class="slider-row"><label for="grade-contrast">Contrast</label><input type="range" id="grade-contrast" data-key="contrast" min="-100" max="100" step="1"><span class="value" id="grade-contrast-v"></span></div>
+            <div class="slider-row"><label for="grade-highlights">Highlights</label><input type="range" id="grade-highlights" data-key="highlights" min="-100" max="100" step="1"><span class="value" id="grade-highlights-v"></span></div>
+            <div class="slider-row"><label for="grade-shadows">Shadows</label><input type="range" id="grade-shadows" data-key="shadows" min="-100" max="100" step="1"><span class="value" id="grade-shadows-v"></span></div>
+            <div class="slider-row"><label for="grade-fade">Fade</label><input type="range" id="grade-fade" data-key="fade" min="0" max="100" step="1"><span class="value" id="grade-fade-v"></span></div>
+          </div>
+
+          <div class="group">
+            <div class="group-title">Color</div>
+            <div class="slider-row"><label for="grade-temperature">Temperature</label><input type="range" class="temp" id="grade-temperature" data-key="temperature" min="-100" max="100" step="1"><span class="value" id="grade-temperature-v"></span></div>
+            <div class="slider-row"><label for="grade-tint">Tint</label><input type="range" class="tint" id="grade-tint" data-key="tint" min="-100" max="100" step="1"><span class="value" id="grade-tint-v"></span></div>
+            <div class="slider-row"><label for="grade-saturation">Saturation</label><input type="range" id="grade-saturation" data-key="saturation" min="-100" max="100" step="1"><span class="value" id="grade-saturation-v"></span></div>
+            <div class="slider-row"><label for="grade-vibrance">Vibrance</label><input type="range" id="grade-vibrance" data-key="vibrance" min="-100" max="100" step="1"><span class="value" id="grade-vibrance-v"></span></div>
+          </div>
+
+          <div class="group">
+            <button class="btn wide" id="grade-reset">Reset this section</button>
+            <p class="hint">Double-click a slider to reset it. Hold <span class="kbd">C</span> to compare with the original.</p>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <div class="viewer">
+      <div class="stage">
+        <div class="screen" id="screen">
+          <video id="video" playsinline preload="auto"></video>
+          <img class="effect" id="effect" alt="" hidden>
+          <canvas class="grade-layer" id="grade-layer" hidden></canvas>
+          <div class="safe-zones" id="safe-zone-layer" hidden></div>
+          <div class="caption-box" id="caption-box" hidden>
+            <span class="caption-box-label">Drag to move</span>
+            <div class="caption-box-handle" id="caption-box-handle" title="Drag to resize"></div>
+          </div>
+          <div class="center-guide" id="center-guide" hidden></div>
+          <div class="stage-badge" id="badge" hidden></div>
+        </div>
+      </div>
+      <div class="transport">
+        <div class="scrub">
+          <div class="seekbar" id="seekbar" role="slider" tabindex="0" aria-label="Playhead" aria-valuemin="0">
+            <div class="track"></div><div class="fill" id="seek-fill"></div><div class="knob" id="seek-knob"></div>
+          </div>
+        </div>
+        <div class="timecode" id="timecode"><b>00:00:00:00</b> / 00:00:00:00</div>
+        <div class="center">
+          <button class="btn ghost icon-only" id="frame-back" aria-label="Previous frame" title="Previous frame (Left)"><svg class="icon"><use href="#i-prev"/></svg></button>
+          <button class="btn icon-only" id="play" aria-label="Play" title="Play (Space)"><svg class="icon"><use href="#i-play"/></svg></button>
+          <button class="btn ghost icon-only" id="frame-next" aria-label="Next frame" title="Next frame (Right)"><svg class="icon"><use href="#i-next"/></svg></button>
+        </div>
+        <div class="right">
+          <button class="btn ghost" id="compare" title="Hold to see the original (C)" hidden><svg class="icon"><use href="#i-compare"/></svg>Compare</button>
+        </div>
+      </div>
+    </div>
+
+    <aside class="inspector" id="inspector" aria-label="Caption style" hidden>
+      <div class="scroll">
+        <div class="group">
+          <div class="group-title"><span>Style</span><span id="preset-state"></span></div>
+          <div class="segmented" role="radiogroup" aria-label="Apply style to">
+            <input type="radio" name="scope" id="scope-all" value="all" checked><label for="scope-all">All captions</label>
+            <input type="radio" name="scope" id="scope-one" value="one"><label for="scope-one">Selected caption</label>
+          </div>
+          <p class="hint" id="scope-hint"></p>
+        </div>
+
+        <div class="group" id="presets-group">
+          <div class="presets" id="presets" role="radiogroup" aria-label="Presets"></div>
+          <button class="btn wide" id="preset-save">Save current as…</button>
+        </div>
+
+        <div class="group global-only">
+          <div class="group-title">Text</div>
+          <div class="field">
+            <label for="st-font">Font</label>
+            <select id="st-font"></select>
+          </div>
+          <div class="field-row">
+            <div class="segmented" role="radiogroup" aria-label="Letter case" style="flex:1">
+              <input type="radio" name="st-case" id="case-as" value="as"><label for="case-as">Aa</label>
+              <input type="radio" name="st-case" id="case-up" value="up"><label for="case-up">AA</label>
+            </div>
+          </div>
+          <div class="field">
+            <div class="group-title"><label for="st-spacing">Letter spacing</label><span class="value" id="st-spacing-v"></span></div>
+            <input type="range" id="st-spacing" min="-10" max="20" step="0.5" list="st-spacing-marks">
+            <datalist id="st-spacing-marks"><option value="0"></option></datalist>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-title"><label for="st-size">Size</label><span class="value" id="st-size-v"></span></div>
+          <input type="range" id="st-size" min="20" max="200" step="1">
+        </div>
+
+        <div class="group">
+          <div class="group-title">Color</div>
+          <div class="color-row"><label for="st-fill">Text</label><input type="color" id="st-fill"></div>
+          <div class="color-row"><label for="st-highlight" id="st-highlight-label">Spoken word</label><input type="color" id="st-highlight"></div>
+          <div class="field global-only">
+            <label for="st-gradient">Gradient</label>
+            <select id="st-gradient">
+              <option value="none">None</option>
+              <option value="across">Left to right</option>
+              <option value="down">Top to bottom</option>
+            </select>
+          </div>
+          <div class="color-row global-only" id="st-gradient-row">
+            <label>Colors</label>
+            <input type="color" id="st-g0" aria-label="First gradient color">
+            <input type="color" id="st-g1" aria-label="Middle gradient color">
+            <input type="color" id="st-g2" aria-label="Last gradient color">
+          </div>
+          <label class="check global-only" id="st-g-mid-row"><input type="checkbox" id="st-g-mid"> Middle color</label>
+          <label class="check global-only"><input type="checkbox" id="st-invert"> Invert the video's brightness inside the text</label>
+        </div>
+
+        <div class="group global-only">
+          <div class="group-title">Animation</div>
+          <div class="field">
+            <label for="st-word">Spoken word</label>
+            <select id="st-word">
+              <option value="color">Highlight color</option>
+              <option value="box">Highlight box</option>
+              <option value="glow">Glow</option>
+              <option value="karaoke">Karaoke fill</option>
+              <option value="reveal">Reveal word by word</option>
+              <option value="pop-up">Pop up word by word</option>
+              <option value="blur">Blur in word by word</option>
+              <option value="dim">Light up (dim upcoming)</option>
+              <option value="none">No highlight</option>
+            </select>
+          </div>
+          <label class="check"><input type="checkbox" id="st-pop"> Grow the spoken word</label>
+          <div class="field">
+            <label for="st-entrance">Caption entrance</label>
+            <select id="st-entrance">
+              <option value="pop">Pop in</option>
+              <option value="bounce">Bounce</option>
+              <option value="slide">Slide up</option>
+              <option value="fade">Fade</option>
+              <option value="pop-up">Spring up</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="group global-only">
+          <div class="group-title">Outline and shadow</div>
+          <div class="color-row">
+            <label for="st-outline">Outline</label>
+            <input type="range" id="st-outline" min="0" max="25" step="1">
+            <input type="color" id="st-outline-color" aria-label="Outline color">
+          </div>
+          <div class="color-row">
+            <label for="st-shadow">Shadow</label>
+            <input type="range" id="st-shadow" min="0" max="15" step="1">
+            <input type="color" id="st-shadow-color" aria-label="Shadow color">
+          </div>
+          <label class="check"><input type="checkbox" id="st-box"> Background box</label>
+          <div class="color-row" id="st-box-row">
+            <label for="st-box-opacity">Opacity</label>
+            <input type="range" id="st-box-opacity" min="10" max="100" step="5">
+            <input type="color" id="st-box-color" aria-label="Box color">
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-title">Position</div>
+          <div class="two">
+            <div class="field"><label for="st-x">Across (%)</label><input type="text" inputmode="numeric" class="input" id="st-x"></div>
+            <div class="field"><label for="st-y">Down (%)</label><input type="text" inputmode="numeric" class="input" id="st-y"></div>
+          </div>
+          <div class="field-row">
+            <button class="btn" id="st-center" style="flex:1">Center across</button>
+          </div>
+          <div class="field">
+            <label for="safe-zones">Safe zone guides</label>
+            <select id="safe-zones">
+              <option value="off">Off</option>
+              <option value="tiktok">TikTok</option>
+              <option value="reels">Instagram Reels</option>
+              <option value="shorts">YouTube Shorts</option>
+            </select>
+          </div>
+          <p class="hint">Drag the caption box on the video to move it, or its corner to resize. To move only some captions, select them on the timeline and choose Top, Middle or Bottom. Guides are approximate.</p>
+        </div>
+
+        <div class="group one-only" id="emphasis-group">
+          <div class="group-title">Emphasize words</div>
+          <p class="hint">Pick a word, then a color. It keeps that color when it isn't being spoken.</p>
+          <div class="chips" id="word-chips"></div>
+          <div class="swatches" id="emphasis-swatches">
+            <button class="swatch" data-emph="#ffd43b" style="background:#ffd43b" aria-label="Yellow"></button>
+            <button class="swatch" data-emph="#3be477" style="background:#3be477" aria-label="Green"></button>
+            <button class="swatch" data-emph="#ff5a5a" style="background:#ff5a5a" aria-label="Red"></button>
+            <button class="swatch" data-emph="#22d3ee" style="background:#22d3ee" aria-label="Cyan"></button>
+            <button class="swatch" data-emph="#a78bfa" style="background:#a78bfa" aria-label="Purple"></button>
+            <button class="btn ghost" data-emph="" style="height:24px;padding:0 8px">Clear</button>
+          </div>
+          <button class="btn wide" id="reset-one">Reset this caption to the overall style</button>
+        </div>
+      </div>
+    </aside>
+
+    <section class="timeline" aria-label="Timeline">
+      <div class="tl-toolbar">
+        <div class="tl-tools" role="toolbar" aria-label="Caption editing">
+          <button class="btn ghost icon-only" id="tl-snap" aria-pressed="true" aria-label="Snapping" title="Snapping (S)"><svg class="icon"><use href="#i-magnet"/></svg></button>
+          <span class="tl-sep" aria-hidden="true"></span>
+          <button class="btn ghost" id="tl-split" title="Split the caption under the playhead (Ctrl+K)"><svg class="icon"><use href="#i-scissors"/></svg>Split</button>
+          <button class="btn ghost" id="tl-merge" title="Merge selected captions (M)"><svg class="icon"><use href="#i-merge"/></svg>Merge</button>
+          <button class="btn ghost" id="tl-add" title="Add a caption at the playhead (A)"><svg class="icon"><use href="#i-plus"/></svg>Add</button>
+          <button class="btn ghost" id="tl-delete" title="Delete selected captions (Delete)"><svg class="icon"><use href="#i-trash"/></svg>Delete</button>
+          <span class="tl-sep" aria-hidden="true"></span>
+          <div class="tl-place" role="group" aria-label="Move selected captions on screen">
+            <button class="btn ghost" id="tl-top" data-place="top" title="Show the selected captions at the top (Alt+Up)">Top</button>
+            <button class="btn ghost" id="tl-middle" data-place="middle" title="Show the selected captions in the middle">Middle</button>
+            <button class="btn ghost" id="tl-bottom" data-place="bottom" title="Show the selected captions at the bottom (Alt+Down)">Bottom</button>
+          </div>
+          <span class="tl-status" id="tl-status" role="status" aria-live="polite"></span>
+        </div>
+        <div class="tl-zoom">
+          <button class="btn ghost icon-only" id="tl-zoom-out" aria-label="Zoom out" title="Zoom out (-)"><svg class="icon"><use href="#i-zoom-out"/></svg></button>
+          <input type="range" id="tl-zoom" min="0" max="100" step="1" value="0" aria-label="Timeline zoom">
+          <button class="btn ghost icon-only" id="tl-zoom-in" aria-label="Zoom in" title="Zoom in (=)"><svg class="icon"><use href="#i-zoom-in"/></svg></button>
+          <button class="btn ghost icon-only" id="tl-fit" aria-label="Fit the whole video" title="Fit the whole video (Backslash)"><svg class="icon"><use href="#i-fit"/></svg></button>
+        </div>
+      </div>
+      <div class="tl-body">
+        <div class="tl-heads" aria-hidden="true">
+          <div class="tl-head ruler"></div>
+          <div class="tl-head captions"><b>C1</b>Captions</div>
+          <div class="tl-head grade"><b>G1</b>Color</div>
+          <div class="tl-head video"><b>V1</b>Video</div>
+          <div class="tl-head audio"><b>A1</b>Audio</div>
+        </div>
+        <div class="tl-scroll" id="tl-scroll">
+          <div class="tl-content" id="tl-content">
+            <div class="tl-row ruler" id="tl-ruler-row"><canvas id="tl-ruler"></canvas></div>
+            <div class="tl-row captions" id="tl-captions" title="Double-click empty space to add a caption"></div>
+            <div class="tl-row grade" id="tl-grades"></div>
+            <div class="tl-row video" id="tl-video-row"><canvas id="tl-video"></canvas></div>
+            <div class="tl-row audio" id="tl-audio-row"><canvas id="tl-audio"></canvas></div>
+            <div class="tl-playhead" id="tl-playhead" aria-hidden="true"><div class="tl-playhead-head"></div></div>
+            <div class="tl-snapline" id="tl-snapline" hidden></div>
+            <div class="tl-marquee" id="tl-marquee" hidden></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="export-dialog" aria-labelledby="export-title">
+  <div class="dlg-head">
+    <h2 id="export-title">Export video</h2>
+    <button class="btn ghost icon-only" data-close aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+  </div>
+
+  <form id="export-form" method="dialog">
+    <div class="dlg-body">
+      <div class="field" id="export-what-field">
+        <span class="label">Export</span>
+        <div class="segmented" role="radiogroup" aria-label="What to export">
+          <input type="radio" name="what" id="what-video" value="video" checked><label for="what-video">Video</label>
+          <input type="radio" name="what" id="what-captions" value="captions"><label for="what-captions">Captions only</label>
+        </div>
+      </div>
+      <div class="field">
+        <label for="export-name">File</label>
+        <div class="file-row">
+          <div class="name-input"><input id="export-name" spellcheck="false" autocomplete="off"><span class="ext" id="export-ext">.mp4</span></div>
+          <button type="button" class="btn" id="export-browse"><svg class="icon"><use href="#i-folder"/></svg>Change location</button>
+        </div>
+        <div class="location" id="export-dir" title=""></div>
+      </div>
+      <div class="field">
+        <span class="label">Format</span>
+        <div class="formats" role="radiogroup" aria-label="Format">
+          <label class="format" data-for="video"><input type="radio" name="format" value="h264"><span class="t">MP4 · H.264</span><span class="d">Plays everywhere</span></label>
+          <label class="format" data-for="video"><input type="radio" name="format" value="h265"><span class="t">MP4 · H.265</span><span class="d">About half the size</span></label>
+          <label class="format"><input type="radio" name="format" value="prores"><span class="t">ProRes · MOV</span><span class="d" data-video="For editing in Premiere or Resolve" data-captions="Styled overlay with transparency">For editing in Premiere or Resolve</span></label>
+          <label class="format"><input type="radio" name="format" value="webm"><span class="t">WebM · VP9</span><span class="d" data-video="For the web" data-captions="Styled overlay, smaller files">For the web</span></label>
+          <label class="format" data-for="captions" hidden><input type="radio" name="format" value="srt"><span class="t">SRT</span><span class="d">Editable text in any editor</span></label>
+          <label class="format" data-for="captions" hidden><input type="radio" name="format" value="vtt"><span class="t">WebVTT</span><span class="d">Text for web players and YouTube</span></label>
+        </div>
+        <p class="hint" id="format-note"></p>
+      </div>
+      <div class="two" id="export-picture">
+        <div class="field">
+          <label for="export-size">Resolution</label>
+          <select id="export-size"></select>
+        </div>
+        <div class="field">
+          <span class="label">Quality</span>
+          <div class="segmented" role="radiogroup" aria-label="Quality">
+            <input type="radio" name="quality" id="q-high" value="high"><label for="q-high">High</label>
+            <input type="radio" name="quality" id="q-balanced" value="balanced"><label for="q-balanced">Balanced</label>
+            <input type="radio" name="quality" id="q-small" value="small"><label for="q-small">Small</label>
+          </div>
+        </div>
+      </div>
+      <div class="field" id="export-captions-field">
+        <span class="label">Captions</span>
+        <label class="check"><input type="checkbox" id="export-burn"> Burn captions into the video</label>
+        <label class="check"><input type="checkbox" id="export-srt"> Also save an .srt captions file</label>
+      </div>
+      <p class="warn-line" id="export-error" role="alert" hidden></p>
+    </div>
+    <div class="dlg-foot">
+      <span class="hint" id="export-summary"></span>
+      <span class="spacer"></span>
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary" id="export-start"><svg class="icon"><use href="#i-export"/></svg>Export</button>
+    </div>
+  </form>
+
+  <div id="export-running" hidden>
+    <div class="dlg-body export-progress">
+      <div class="big" id="run-percent">0%</div>
+      <div class="progress"><div id="run-bar"></div></div>
+      <p class="hint" id="run-detail">Starting…</p>
+      <div class="result-path" id="run-path"></div>
+      <p class="hint">You can close this window and keep editing. The export carries on in the background.</p>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn danger" id="run-cancel">Cancel export</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" data-close>Hide</button>
+    </div>
+  </div>
+
+  <div id="export-done" hidden>
+    <div class="dlg-body">
+      <div class="done-mark"><svg class="icon"><use href="#i-check"/></svg>Export finished</div>
+      <div class="result-path" id="done-path"></div>
+      <p class="hint" id="done-detail"></p>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn" id="done-reveal"><svg class="icon"><use href="#i-folder"/></svg>Show in folder</button>
+      <button type="button" class="btn" id="done-open"><svg class="icon"><use href="#i-play"/></svg>Play</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn primary" data-close>Done</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="preset-dialog" aria-labelledby="preset-title">
+  <div class="dlg-head">
+    <h2 id="preset-title">Save caption preset</h2>
+    <button class="btn ghost icon-only" data-close aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="dlg-body">
+    <div class="field">
+      <label for="preset-name">Name</label>
+      <input type="text" id="preset-name" class="input" maxlength="40" autocomplete="off" placeholder="My style">
+    </div>
+    <p class="hint">Saved with this project, under the built-in styles.</p>
+  </div>
+  <div class="dlg-foot">
+    <span class="spacer"></span>
+    <button class="btn" data-close>Cancel</button>
+    <button class="btn primary" id="preset-save-btn">Save</button>
+  </div>
+</dialog>
+
+<dialog id="look-dialog" aria-labelledby="look-title">
+  <div class="dlg-head">
+    <h2 id="look-title">Save look</h2>
+    <button class="btn ghost icon-only" data-close aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="dlg-body">
+    <div class="field">
+      <label for="look-name">Name</label>
+      <input type="text" id="look-name" class="input" maxlength="40" autocomplete="off" placeholder="My look">
+    </div>
+    <p class="hint">Saved looks are available in every video.</p>
+  </div>
+  <div class="dlg-foot">
+    <span class="spacer"></span>
+    <button class="btn" data-close>Cancel</button>
+    <button class="btn primary" id="look-save-btn">Save</button>
+  </div>
+</dialog>
+
+<dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+  <div class="dlg-head">
+    <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+    <button class="btn ghost icon-only" data-close aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="dlg-body">
+    <div class="shortcuts">
+      <span>Play or pause</span><span class="kbd">Space</span>
+      <span>Previous or next frame</span><span class="kbd">Left / Right</span>
+      <span>Back or forward 1 second</span><span class="kbd">Shift + Left / Right</span>
+      <span>Jump to start or end</span><span class="kbd">Home / End</span>
+      <span>Split caption at the playhead</span><span class="kbd">Ctrl + K</span>
+      <span>Merge selected captions</span><span class="kbd">M</span>
+      <span>Add a caption at the playhead</span><span class="kbd">A</span>
+      <span>Delete selected captions</span><span class="kbd">Delete</span>
+      <span>Nudge selected captions a frame (5 with Shift)</span><span class="kbd">Alt + Left / Right</span>
+      <span>Move selected captions up or down the screen</span><span class="kbd">Alt + Up / Down</span>
+      <span>Select all captions</span><span class="kbd">Ctrl + A</span>
+      <span>Snapping on or off</span><span class="kbd">S</span>
+      <span>Zoom the timeline in or out</span><span class="kbd">= / -</span>
+      <span>Fit the whole video</span><span class="kbd">Backslash</span>
+      <span>Compare with the original (hold)</span><span class="kbd">C</span>
+      <span>Background, Captions or Color tab</span><span class="kbd">Ctrl + 1 / 2 / 3</span>
+      <span>Undo</span><span class="kbd">Ctrl + Z</span>
+      <span>Redo</span><span class="kbd">Ctrl + Shift + Z</span>
+      <span>Export</span><span class="kbd">Ctrl + E</span>
+      <span>Open a video</span><span class="kbd">Ctrl + O</span>
+      <span>Back to start</span><span class="kbd">Ctrl + W</span>
+      <span>Find and replace a caption word</span><span class="kbd">Ctrl + H</span>
+      <span>This list</span><span class="kbd">?</span>
+    </div>
+  </div>
+</dialog>
+
+<div class="drop-veil" id="drop-veil" hidden>Drop to open this video</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
