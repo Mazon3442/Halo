@@ -57,7 +57,20 @@ jobs:
         id: version
         run: echo "number=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      # The bundle takes DirectML.dll from target/release, which the plain cargo build puts there.
+      # The bundle takes DirectML.dll from target/release, where ort places it. On runners (unlike a dev machine
+      # without Developer Mode) ort makes it a symlink into its cache, and Tauri's resource copy then copies the
+      # file onto itself and fails with "being used by another process". Place it first and make it a real file.
+      - name: Place DirectML.dll
+        shell: pwsh
+        run: |
+          cargo build --release -p ort-sys
+          $dll = Get-Item target/release/DirectML.dll
+          if ($dll.LinkType) {
+            $source = $dll.ResolveLinkTarget($true).FullName
+            Remove-Item $dll.FullName
+            Copy-Item $source $dll.FullName
+          }
+
       - name: Build installer
         run: |
           cargo build --release
