@@ -17,6 +17,12 @@ export const DEFAULT_LOOK = {
   tint: 0,
   saturation: 0,
   vibrance: 0,
+  /** Split-toning, like Premiere and Lightroom's colour wheels: shadows and highlights each drift
+      toward their own hue. The sliders never touch these; only looks set them. */
+  shadowHue: 0,
+  shadowSat: 0,
+  highlightHue: 0,
+  highlightSat: 0,
   /** An imported LUT, { id, name }, from Halo's LUT library. */
   lut: null,
   lutAmount: 1,
@@ -31,6 +37,25 @@ export const LOOKS = [
   { id: "faded", name: "Faded", look: { fade: 0.5, contrast: -0.15, saturation: -0.2 } },
   { id: "moody", name: "Moody", look: { exposure: -0.2, contrast: 0.25, temperature: -0.15, saturation: -0.25, shadows: -0.15 } },
   { id: "mono", name: "Black & white", look: { saturation: -1, contrast: 0.2 } },
+  { id: "orangeblue", name: "Orange & Blue", look: { contrast: 0.12, vibrance: 0.18, saturation: 0.06, shadowHue: 200, shadowSat: 0.3, highlightHue: 32, highlightSat: 0.32 } },
+  { id: "speakeasy", name: "Speakeasy", look: { temperature: 0.35, tint: 0.04, saturation: -0.2, vibrance: -0.05, contrast: 0.1, fade: 0.22, highlights: -0.12, shadows: 0.1, shadowHue: 35, shadowSat: 0.16, highlightHue: 45, highlightSat: 0.18 } },
+  { id: "indoorvintage", name: "Indoor Vintage", look: { temperature: 0.2, tint: -0.05, saturation: -0.28, contrast: -0.12, fade: 0.3, highlights: -0.12, shadows: 0.12, shadowHue: 45, shadowSat: 0.16, highlightHue: 50, highlightSat: 0.14 } },
+  { id: "journey", name: "Journey", look: { temperature: -0.08, vibrance: 0.28, saturation: 0.06, contrast: 0.1, highlights: -0.08, fade: 0.06, shadowHue: 198, shadowSat: 0.16, highlightHue: 40, highlightSat: 0.1 } },
+  { id: "sicily", name: "Sicily", look: { temperature: 0.45, tint: 0.05, saturation: 0.1, vibrance: 0.12, contrast: 0.04, fade: 0.12, highlights: -0.18, shadows: 0.1, shadowHue: 40, shadowSat: 0.1, highlightHue: 38, highlightSat: 0.22 } },
+  { id: "noir", name: "Noir", look: { saturation: -1, contrast: 0.35, fade: 0.15, shadows: -0.1, exposure: -0.05 } },
+  { id: "pastel", name: "Pastel", look: { contrast: -0.18, saturation: -0.15, fade: 0.35, highlights: -0.15, vibrance: 0.1 } },
+  { id: "film", name: "Film", look: { contrast: 0.08, saturation: -0.1, fade: 0.18, temperature: -0.05, shadowHue: 210, shadowSat: 0.12, highlightHue: 45, highlightSat: 0.12 } },
+  { id: "teal", name: "Teal", look: { temperature: -0.3, tint: -0.05, saturation: 0.06, contrast: 0.1, shadowHue: 200, shadowSat: 0.22 } },
+  { id: "ember", name: "Ember", look: { temperature: 0.4, saturation: 0.15, contrast: 0.18, highlights: -0.2, fade: 0.08, shadowHue: 25, shadowSat: 0.2 } },
+  { id: "bloom", name: "Bloom", look: { exposure: 0.12, highlights: -0.2, contrast: -0.08, vibrance: 0.25, fade: 0.1, temperature: 0.05 } },
+  { id: "bleach", name: "Bleach Bypass", look: { saturation: -0.75, contrast: 0.45, highlights: -0.12, shadows: -0.08, exposure: 0.05, fade: 0.06 } },
+  { id: "blockbuster", name: "Blockbuster", look: { contrast: 0.28, saturation: 0.22, vibrance: 0.15, temperature: 0.08, highlights: -0.1, shadowHue: 205, shadowSat: 0.25, highlightHue: 30, highlightSat: 0.28 } },
+  { id: "moonrise", name: "Moonrise", look: { temperature: 0.3, tint: 0.04, saturation: 0.2, vibrance: 0.1, contrast: 0.14, highlights: -0.1, fade: 0.04, shadowHue: 40, shadowSat: 0.14, highlightHue: 35, highlightSat: 0.12 } },
+  { id: "matrix", name: "Matrix", look: { temperature: -0.15, tint: -0.18, saturation: 0.04, contrast: 0.18, highlights: -0.08, fade: 0.06, shadowHue: 140, shadowSat: 0.2, highlightHue: 120, highlightSat: 0.08 } },
+  { id: "her", name: "Her", look: { temperature: 0.22, tint: 0.16, saturation: -0.12, vibrance: 0.08, contrast: -0.04, fade: 0.2, highlights: -0.12, shadowHue: 25, shadowSat: 0.08, highlightHue: 330, highlightSat: 0.12 } },
+  { id: "kodak", name: "Kodak", look: { temperature: 0.26, tint: 0.04, saturation: 0.12, vibrance: 0.1, contrast: 0.06, fade: 0.1, highlights: -0.08, shadowHue: 35, shadowSat: 0.12, highlightHue: 40, highlightSat: 0.14 } },
+  { id: "fuji", name: "Fuji", look: { temperature: -0.2, tint: -0.05, saturation: 0.06, vibrance: 0.08, contrast: 0.04, fade: 0.08, shadowHue: 210, shadowSat: 0.1, highlightHue: 45, highlightSat: 0.06 } },
+  { id: "polaroid", name: "Polaroid", look: { temperature: 0.1, tint: 0.03, saturation: -0.16, contrast: -0.14, fade: 0.28, highlights: -0.12, vibrance: 0.06, shadowHue: 30, shadowSat: 0.06 } },
 ];
 
 export function makeLook(partial = {}) {
@@ -38,7 +63,7 @@ export function makeLook(partial = {}) {
 }
 
 export function isNeutral(look) {
-  return Object.keys(DEFAULT_LOOK).every((k) => k === "lutAmount" || look[k] === DEFAULT_LOOK[k]);
+  return Object.keys(DEFAULT_LOOK).every((k) => k === "lutAmount" || (look[k] ?? DEFAULT_LOOK[k]) === DEFAULT_LOOK[k]);
 }
 
 /* ---------- the colour math ---------- */
@@ -48,6 +73,12 @@ const toGamma = (c) => (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.
 const clamp01 = (c) => Math.min(1, Math.max(0, c));
 const smooth = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
 const luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+/** A fully saturated colour for a hue in degrees, in display values 0 to 1. */
+function hueColor(h) {
+  const x = 1 - Math.abs(((h / 60) % 2) - 1);
+  return h < 60 ? [1, x, 0] : h < 120 ? [x, 1, 0] : h < 180 ? [0, 1, x] : h < 240 ? [0, x, 1] : h < 300 ? [x, 0, 1] : [1, 0, x];
+}
 
 /**
  * One colour through a look's sliders, on display values from 0 to 1. Exposure and white balance
@@ -82,6 +113,23 @@ function adjust([r, g, b], look) {
   const sat = Math.max(r, g, b) - Math.min(r, g, b);
   const s = Math.max(0, (1 + look.saturation) * (1 + look.vibrance * (1 - sat) * 0.9));
   [r, g, b] = [r, g, b].map((c) => l2 + (c - l2) * s);
+
+  // Split-toning: shadows drift toward one hue, highlights toward another, weighted by how dark
+  // or bright they are. The crossover sits around the mid-tones so the two casts don't fight.
+  const ss = look.shadowSat ?? 0;
+  const hs = look.highlightSat ?? 0;
+  if (ss > 0 || hs > 0) {
+    const l3 = luma(r, g, b);
+    const wSh = 1 - smooth(0.3, 0.72, l3);
+    const wHi = smooth(0.3, 0.72, l3);
+    const st = hueColor(look.shadowHue ?? 0);
+    const ht = hueColor(look.highlightHue ?? 0);
+    [r, g, b] = [
+      clamp01(r + (st[0] - r) * ss * wSh + (ht[0] - r) * hs * wHi),
+      clamp01(g + (st[1] - g) * ss * wSh + (ht[1] - g) * hs * wHi),
+      clamp01(b + (st[2] - b) * ss * wSh + (ht[2] - b) * hs * wHi),
+    ];
+  }
 
   // Fade lifts the blacks and softens the whites, like old film.
   const f = look.fade * 0.16;

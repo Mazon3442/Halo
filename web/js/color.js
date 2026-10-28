@@ -3,6 +3,7 @@
 // timeline's Color track, where they're moved and trimmed; the player draws them live.
 
 import { DEFAULT_LOOK, LOOKS, createGradePlayer, importLut, isNeutral, loadLut, makeLook, paintSwatch, parseXmp, sectionAt } from "./grade.js";
+import { createScopes } from "./scopes.js";
 
 const $ = (id) => document.getElementById(id);
 const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "fade", "temperature", "tint", "saturation", "vibrance", "lutAmount"];
@@ -76,8 +77,8 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     $("grade-hint").textContent = s
       ? "Changes apply to this section. Drag it or its edges on the Color track to change where it starts and ends."
       : sections.length
-        ? "Select a section on the Color track to edit it, or grade the stretch the playhead is in."
-        : "Grade the whole video, then split it at the playhead to grade parts differently.";
+        ? "Select a section on the Color track to edit it. Ctrl+K splits at the playhead, Delete removes a grade."
+        : "Grade the whole video, then split it with Ctrl+K to grade parts differently.";
     if (!s) return;
     const look = { ...DEFAULT_LOOK, ...s.look };
     for (const key of SLIDERS) {
@@ -167,27 +168,53 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
   /* ---------- controls ---------- */
 
   $("grade-add").addEventListener("click", () => addSection());
-  $("grade-split").addEventListener("click", () => {
-    const s = current();
+  $("grade-split").addEventListener("click", () => splitAtPlayhead());
+  $("grade-delete").addEventListener("click", () => deleteSection());
+  $("grade-reset").addEventListener("click", () => resetSection());
+
+  /* Splitting and deleting a section, exposed to the timeline (right-click, the × button, the
+     razor) and to the keyboard. */
+
+  function splitAtPlayhead() {
     const t = video.currentTime;
-    if (!s || t <= s.start + 0.1 || t >= s.end - 0.1) return toast("Move the playhead inside this section to split it.");
+    const s = sectionAt(store.doc.grade, t) ?? current();
+    if (!s || t <= s.start + 0.1 || t >= s.end - 0.1) return toast("Move the playhead inside a graded section to split it.");
+    timeline.selectGrade(s.id);
     store.update((d) => {
-      const x = current(d);
+      const x = d.grade.sections.find((g) => g.id === s.id);
+      if (!x) return;
       const id = d.grade.nextId++;
       d.grade.sections.push({ ...structuredClone(x), id, start: t });
       x.end = t;
       d.grade.sections.sort((a, b) => a.start - b.start);
     });
     render();
-  });
-  $("grade-delete").addEventListener("click", () => {
-    const s = current();
+  }
+
+  function deleteSection(id = null) {
+    const s = id != null ? store.doc.grade.sections.find((x) => x.id === id) : current();
     if (!s) return;
     store.update((d) => { d.grade.sections = d.grade.sections.filter((x) => x.id !== s.id); });
     timeline.selectGrade(null);
     toast("Grade removed", { action: "Undo", onAction: () => store.undo() });
-  });
-  $("grade-reset").addEventListener("click", () => edit((s) => { s.look = makeLook(); s.name = "Graded"; s.preset = null; }));
+  }
+
+  function deleteSelected() {
+    if (timeline.gradeSelection != null) deleteSection(timeline.gradeSelection);
+  }
+
+  function resetSection(id = null) {
+    const target = id != null ? store.doc.grade.sections.find((x) => x.id === id) : current();
+    if (!target) return;
+    store.update((d) => {
+      const s = d.grade.sections.find((x) => x.id === target.id);
+      if (s) { s.look = makeLook(); s.name = "Graded"; s.preset = null; }
+    });
+  }
+
+  timeline.onGradeSplit = splitAtPlayhead;
+  timeline.onGradeDelete = deleteSection;
+  timeline.onGradeReset = resetSection;
 
   for (const key of SLIDERS) {
     const el = $(`grade-${key}`);
@@ -287,8 +314,39 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     }
   }
 
+  /* ---------- scopes ---------- */
+
+  const scopeOverlay = $("scopes");
+  const scopeToggle = $("scopes-toggle");
+  const scopes = createScopes({ frame: () => video });
+  let scopeLut = null;
+  let scopeLutId = null;
+
+  function setScopes(on) {
+    scopeOverlay.hidden = !on;
+    scopeToggle.setAttribute("aria-pressed", String(on));
+    scopes.setVisible(on);
+  }
+
+  scopeToggle.addEventListener("click", () => setScopes(scopeOverlay.hidden));
+
+  /** Feeds the scopes the section under the playhead, resolving its LUT once and caching it. */
+  function updateScopeGrade() {
+    const doc = store.doc;
+    const s = doc ? sectionAt(doc.grade, video.currentTime) : null;
+    const look = s && !isNeutral(s.look) ? s.look : null;
+    const lutId = look?.lut?.id ?? null;
+    if (lutId !== scopeLutId) {
+      scopeLutId = lutId;
+      scopeLut = null;
+      if (lutId) loadLut(lutId).then((l) => { if (scopeLutId === lutId) scopeLut = l; }).catch(() => {});
+    }
+    scopes.setGrade(look, look?.lut ? scopeLut : null);
+  }
+
   (function loop() {
     draw();
+    updateScopeGrade();
     requestAnimationFrame(loop);
   })();
 
@@ -296,5 +354,15 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     render,
     /** The graded picture, when it's showing, for layers that use the frame (inverted captions). */
     get layer() { return layer.hidden ? null : layer; },
+    splitAtPlayhead,
+    deleteSelected,
+    resetSelected: () => resetSection(),
+    toggleScopes: () => setScopes(scopeOverlay.hidden),
+    setScopes,
+    /** Called when the Color tab opens or closes, so scopes only appear where they belong. */
+    setActive(on) {
+      scopeToggle.hidden = !on;
+      if (!on) setScopes(false);
+    },
   };
 }

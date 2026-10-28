@@ -409,3 +409,55 @@ dialog[open] { animation: rise .16s var(--ease); }
 .tl-grade:hover { filter: brightness(1.15); }
 .tl-grade.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); z-index: 2; }
 .tl-grade.selected .tl-trim { background: #7cc4ff40; }
+.workspace.on-color .tl-row.grade { cursor: crosshair; }
+.tl-grade .tl-remove {
+  position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; padding: 0;
+  display: grid; place-items: center; border: 0; border-radius: 4px;
+  background: #000000a0; color: #ffe6c7; cursor: pointer; opacity: 0;
+  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.tl-grade .tl-remove svg { width: 11px; height: 11px; }
+.tl-grade:hover .tl-remove, .tl-grade.selected .tl-remove, .tl-grade .tl-remove:focus-visible { opacity: 1; }
+.tl-grade .tl-remove:hover { background: #c0392b; color: #fff; }
+
+/* ---------- scopes ---------- */
+#scopes-toggle[aria-pressed=true] { background: var(--accent-wash); color: var(--accent); }
+.scopes {
+  position: absolute; top: 12px; right: 12px; z-index: 8;
+  display: grid; grid-template-columns: 160px 160px; grid-template-rows: 96px 96px; gap: 6px;
+  padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-lg);
+  background: #0d0f1299; backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px #0006; pointer-events: none;
+}
+.scope { position: relative; overflow: hidden; border-radius: var(--radius); background: #08090b; border: 1px solid var(--line-soft); }
+.scope canvas { display: block; width: 100%; height: 100%; }
+#scope-vector { width: auto; height: 100%; aspect-ratio: 1 / 1; margin: 0 auto; }
+.scope-label {
+  position: absolute; left: 5px; bottom: 3px;
+  font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-3); pointer-events: none;
+}
+
+/* ---------- context menu ---------- */
+.menu {
+  position: fixed; z-index: 70; min-width: 188px; padding: 4px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-1); box-shadow: 0 12px 32px #000a;
+  transform-origin: var(--menu-origin, top left);
+  animation: menu-in .12s var(--ease);
+}
+@keyframes menu-in { from { opacity: 0; transform: scale(.96); } }
+@media (prefers-reduced-motion: reduce) { .menu { animation: none; } }
+.menu-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 7px 10px; border: 0; border-radius: 5px;
+  background: none; color: var(--text); text-align: left; cursor: pointer; font-size: 13px;
+}
+.menu-item:hover { background: var(--bg-3); }
+.menu-item:active { transform: scale(.98); }
+.menu-item:disabled { opacity: .4; cursor: default; }
+.menu-item:disabled:hover { background: none; }
+.menu-item.danger { color: var(--danger); }
+.menu-item .icon { width: 15px; height: 15px; color: var(--text-3); }
+.menu-item.danger .icon { color: var(--danger); }
+.menu-sep { height: 1px; margin: 4px 6px; background: var(--line-soft); }

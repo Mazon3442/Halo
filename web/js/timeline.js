@@ -51,6 +51,12 @@ export class Timeline {
   constructor({ store, video, toast, onSelectionChange, onSeek, onGradeSelect }) {
     this.store = store;
     this.onGradeSelect = onGradeSelect;
+    /** Colour-track actions the panel fills in: split at the playhead, remove a grade, reset a look. */
+    this.onGradeSplit = null;
+    this.onGradeDelete = null;
+    this.onGradeReset = null;
+    /** Set by the app to make the toolbar's Split button context-aware. */
+    this.onSplitRequest = null;
     this.grades = $("tl-grades");
     this.video = video;
     this.toast = toast;
@@ -447,7 +453,7 @@ export class Timeline {
     $("tl-zoom-out").addEventListener("click", () => this.zoomBy(1 / 1.5));
     $("tl-fit").addEventListener("click", () => this.fit());
     $("tl-snap").addEventListener("click", () => this.toggleSnapping());
-    $("tl-split").addEventListener("click", () => this.splitAtPlayhead());
+    $("tl-split").addEventListener("click", () => (this.onSplitRequest ? this.onSplitRequest() : this.splitAtPlayhead()));
     $("tl-merge").addEventListener("click", () => this.mergeSelected());
     $("tl-delete").addEventListener("click", () => this.deleteSelected());
     $("tl-add").addEventListener("click", () => this.addAt(this.video.currentTime));
@@ -481,6 +487,11 @@ export class Timeline {
 
     this.track.addEventListener("pointerdown", (ev) => this.#pointerDown(ev));
     this.grades.addEventListener("pointerdown", (ev) => this.#gradeDown(ev));
+    this.grades.addEventListener("contextmenu", (ev) => this.#gradeContext(ev));
+    document.addEventListener("pointerdown", (ev) => {
+      if (!$("context-menu").hidden && !ev.target.closest("#context-menu")) this.#closeMenu();
+    }, true);
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") this.#closeMenu(); });
     this.track.addEventListener("dblclick", (ev) => {
       const clip = ev.target.closest(".tl-clip");
       if (clip) this.editText(Number(clip.dataset.k));
@@ -652,6 +663,18 @@ export class Timeline {
       name.textContent = s.name || "Graded";
       el.title = `${s.name || "Graded"}. Drag to move, drag an edge to change where it starts or ends.`;
       el.append(name);
+      const remove = document.createElement("button");
+      remove.className = "tl-remove";
+      remove.title = "Remove this section's grade";
+      remove.setAttribute("aria-label", `Remove the grade on ${s.name || "this section"}`);
+      remove.innerHTML = `<svg class="icon"><use href="#i-x"/></svg>`;
+      remove.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+      remove.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this.selectGrade(s.id);
+        this.onGradeDelete?.(s.id);
+      });
+      el.append(remove);
       for (const side of ["left", "right"]) {
         const h = document.createElement("div");
         h.className = `tl-trim ${side}`;
@@ -727,6 +750,55 @@ export class Timeline {
     this.grades.addEventListener("pointermove", move);
     this.grades.addEventListener("pointerup", up, { once: true });
     this.grades.addEventListener("pointercancel", up, { once: true });
+  }
+
+  /* ---------- grade context menu ---------- */
+
+  #gradeContext(ev) {
+    ev.preventDefault();
+    const block = ev.target.closest(".tl-grade");
+    const t = this.#timeAt(ev.clientX);
+    const underCursor = block
+      ? this.#sections.find((s) => s.id === Number(block.dataset.id))
+      : this.#sections.find((s) => t >= s.start && t < s.end);
+    if (underCursor && this.gradeSelection !== underCursor.id) this.selectGrade(underCursor.id);
+    const selected = this.#sections.find((s) => s.id === this.gradeSelection) ?? underCursor ?? null;
+    const splittable = this.#sections.some((s) => this.video.currentTime > s.start + 0.1 && this.video.currentTime < s.end - 0.1);
+    this.#openMenu(ev.clientX, ev.clientY, [
+      { label: "Split at playhead", icon: "#i-scissors", disabled: !splittable, action: () => this.onGradeSplit?.() },
+      { sep: true },
+      { label: "Remove grade", icon: "#i-trash", danger: true, disabled: !selected, action: () => this.onGradeDelete?.(selected.id) },
+      { label: "Reset look", icon: "#i-undo", disabled: !selected, action: () => this.onGradeReset?.(selected.id) },
+    ]);
+  }
+
+  #openMenu(x, y, items) {
+    const menu = $("context-menu");
+    menu.replaceChildren();
+    for (const it of items) {
+      if (it.sep) {
+        const d = document.createElement("div");
+        d.className = "menu-sep";
+        menu.append(d);
+        continue;
+      }
+      const b = document.createElement("button");
+      b.className = `menu-item${it.danger ? " danger" : ""}`;
+      b.setAttribute("role", "menuitem");
+      if (it.icon) b.innerHTML = `<svg class="icon"><use href="${it.icon}"/></svg>`;
+      b.append(document.createTextNode(it.label));
+      b.disabled = !!it.disabled;
+      if (!it.disabled) b.addEventListener("click", () => { this.#closeMenu(); it.action(); });
+      menu.append(b);
+    }
+    menu.hidden = false;
+    const r = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - r.width - 4))}px`;
+    menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 4))}px`;
+  }
+
+  #closeMenu() {
+    $("context-menu").hidden = true;
   }
 
   /* ---------- canvases ---------- */

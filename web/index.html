@@ -36,6 +36,7 @@
   <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.7-1.3-.7-2.2 0-.9.7-1.6 1.6-1.6H17a4 4 0 0 0 4-4c0-4.7-4-8.6-9-8.6z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10.5" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7.5" r="1.2" fill="currentColor"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-scope" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M6 15l3-5 2 3 3-7 4 9"/></symbol>
 </svg>
 
 <div class="app">
@@ -252,6 +253,12 @@
           <div class="center-guide" id="center-guide" hidden></div>
           <div class="stage-badge" id="badge" hidden></div>
         </div>
+        <div class="scopes" id="scopes" hidden>
+          <div class="scope"><canvas id="scope-wave"></canvas><span class="scope-label">Waveform</span></div>
+          <div class="scope"><canvas id="scope-parade"></canvas><span class="scope-label">RGB Parade</span></div>
+          <div class="scope"><canvas id="scope-vector"></canvas><span class="scope-label">Vectorscope</span></div>
+          <div class="scope"><canvas id="scope-hist"></canvas><span class="scope-label">Histogram</span></div>
+        </div>
       </div>
       <div class="transport">
         <div class="scrub">
@@ -266,6 +273,7 @@
           <button class="btn ghost icon-only" id="frame-next" aria-label="Next frame" title="Next frame (Right)"><svg class="icon"><use href="#i-next"/></svg></button>
         </div>
         <div class="right">
+          <button class="btn ghost" id="scopes-toggle" aria-pressed="false" title="Show colour scopes (Ctrl+Shift+S)" hidden><svg class="icon"><use href="#i-scope"/></svg>Scopes</button>
           <button class="btn ghost" id="compare" title="Hold to see the original (C)" hidden><svg class="icon"><use href="#i-compare"/></svg>Compare</button>
         </div>
       </div>
@@ -613,14 +621,15 @@
       <span>Previous or next frame</span><span class="kbd">Left / Right</span>
       <span>Back or forward 1 second</span><span class="kbd">Shift + Left / Right</span>
       <span>Jump to start or end</span><span class="kbd">Home / End</span>
-      <span>Split caption at the playhead</span><span class="kbd">Ctrl + K</span>
+      <span>Split a caption or colour section at the playhead</span><span class="kbd">Ctrl + K</span>
       <span>Merge selected captions</span><span class="kbd">M</span>
       <span>Add a caption at the playhead</span><span class="kbd">A</span>
-      <span>Delete selected captions</span><span class="kbd">Delete</span>
+      <span>Delete selected captions or a colour grade</span><span class="kbd">Delete</span>
       <span>Nudge selected captions a frame (5 with Shift)</span><span class="kbd">Alt + Left / Right</span>
       <span>Move selected captions up or down the screen</span><span class="kbd">Alt + Up / Down</span>
       <span>Select all captions</span><span class="kbd">Ctrl + A</span>
       <span>Snapping on or off</span><span class="kbd">S</span>
+      <span>Show or hide colour scopes</span><span class="kbd">Ctrl + Shift + S</span>
       <span>Zoom the timeline in or out</span><span class="kbd">= / -</span>
       <span>Fit the whole video</span><span class="kbd">Backslash</span>
       <span>Compare with the original (hold)</span><span class="kbd">C</span>
@@ -638,6 +647,7 @@
 
 <div class="drop-veil" id="drop-veil" hidden>Drop to open this video</div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<div class="menu" id="context-menu" hidden role="menu"></div>
 
 <script type="module" src="/js/app.js"></script>
 </body>

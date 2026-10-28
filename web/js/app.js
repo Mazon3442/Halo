@@ -83,6 +83,7 @@ const timeline = new Timeline({
 });
 const inspector = createInspector({ store, timeline, video, toast });
 const color = createColorPanel({ store, timeline, video, toast, getPrefs: () => prefs, savePrefs, isComparing: () => comparing });
+timeline.onSplitRequest = () => splitAtPlayhead();
 
 /* ---------- start screen ---------- */
 
@@ -225,6 +226,8 @@ $("home-btn").addEventListener("click", showHome);
 
 function setTab(name) {
   tab = name;
+  $("editor").classList.toggle("on-color", name === "color");
+  color.setActive(name === "color");
   for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t.dataset.tab === name));
   $("panel-background").hidden = name !== "background";
   $("panel-captions").hidden = name !== "captions";
@@ -807,6 +810,12 @@ for (const dlg of document.querySelectorAll("dialog")) {
   dlg.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => dlg.close()));
 }
 
+/** Splits whatever the active tab edits: a colour section on the Color tab, else a caption. */
+function splitAtPlayhead() {
+  if (tab === "color") color.splitAtPlayhead();
+  else timeline.splitAtPlayhead();
+}
+
 document.addEventListener("keydown", (ev) => {
   if (document.querySelector("dialog[open]") || ev.defaultPrevented) return;
   const ctrl = ev.ctrlKey || ev.metaKey;
@@ -821,7 +830,8 @@ document.addEventListener("keydown", (ev) => {
   if (isTyping(ev.target)) return; // text fields keep their own undo and arrow keys
   if (ctrl && key === "z") { ev.preventDefault(); if (ev.shiftKey) store.redo(); else store.undo(); return; }
   if (ctrl && key === "y") { ev.preventDefault(); store.redo(); return; }
-  if (ctrl && key === "k") { ev.preventDefault(); timeline.splitAtPlayhead(); return; }
+  if (ctrl && key === "k") { ev.preventDefault(); splitAtPlayhead(); return; }
+  if (ctrl && ev.shiftKey && key === "s") { ev.preventDefault(); if (tab === "color") color.toggleScopes(); return; }
   if (ctrl && key === "a") { ev.preventDefault(); timeline.selectAll(); return; }
   if (ev.altKey && (key === "arrowleft" || key === "arrowright")) {
     ev.preventDefault();
@@ -834,7 +844,12 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   if (ctrl) return;
-  if (key === "delete" || key === "backspace") { ev.preventDefault(); timeline.deleteSelected(); return; }
+  if (key === "delete" || key === "backspace") {
+    ev.preventDefault();
+    if (tab === "color" && timeline.gradeSelection != null) color.deleteSelected();
+    else timeline.deleteSelected();
+    return;
+  }
   if (key === "escape") { timeline.clearSelection(); return; }
   if (key === "m") { timeline.mergeSelected(); return; }
   if (key === "a") { timeline.addAt(video.currentTime); return; }
