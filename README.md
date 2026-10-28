@@ -60,6 +60,22 @@ cargo build --release                    # DirectML.dll is copied next to the ex
 npx @tauri-apps/cli@2 build              # installer in target/release/bundle/nsis
 ```
 
+## Release
+
+Push an annotated version tag and GitHub Actions (`.github/workflows/release.yml`) builds the installer,
+signs it for in-app updates and publishes a release; the tag's message becomes the release notes. The
+version comes from the tag, so there's nothing to bump.
+
+```bash
+git tag -a v0.3.0 -F notes.md
+git push origin v0.3.0
+```
+
+Installed copies check the latest release's `latest.json` on launch and offer to update. Updates are
+signed with the `TAURI_SIGNING_PRIVATE_KEY` repository secret, the private half of the `pubkey` in
+`tauri.conf.json` (kept locally in `~/.tauri/halo-updater.key`). Tags with a hyphen (`v1.0.0-beta.1`)
+become pre-releases, which installed copies don't update to.
+
 `web/vendor/jassub` is [jassub](https://github.com/ThaUnknown/jassub) 2.5.23, bundled with esbuild into
 standalone files. `web/fonts` holds Poppins and Anton (SIL Open Font License). The ffmpeg binaries
 Halo ships with (`ffmpeg/ffmpeg.exe` and `ffmpeg/ffprobe.exe`, the gyan.dev full build) are bundled by
