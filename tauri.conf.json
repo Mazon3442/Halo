@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Halo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.mazon.halo",
   "build": {
     "frontendDist": "web"
@@ -13,7 +13,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "category": "Video",
     "shortDescription": "Local video background effects and captions",
     "longDescription": "Blur, remove or replace the background of a video, and caption it. Runs matting and speech models on your own GPU.",
@@ -30,6 +32,18 @@
       "ffmpeg/ffmpeg.exe": "ffmpeg.exe",
       "ffmpeg/ffprobe.exe": "ffprobe.exe",
       "web/": "web/"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyMDRBRTVGQzcxOUM0NEUKUldST3hCbkhYNjRFSXY4U2xnc24wOG1ZNTZEZUluUXdIU0g0di9rd0lmTTRTY1hMUnNkWlhvRnQK",
+      "endpoints": [
+        "https://github.com/Mazon3442/Halo/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

@@ -107,6 +107,7 @@ impl EffectParams {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             if let Ok(dir) = app.path().resource_dir() {
                 pipeline::use_tools_from(dir);
@@ -190,6 +191,7 @@ fn main() {
                 }
             });
             let _ = state.window.set(window);
+            tauri::async_runtime::spawn(check_for_update(app.handle().clone()));
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -199,6 +201,45 @@ fn main() {
                 let _ = std::fs::remove_dir_all(work_dir());
             }
         });
+}
+
+/// Looks for a newer Halo on GitHub Releases and, if the user agrees, installs it and restarts.
+/// Being offline or there being no release yet is silent: updating never gets in the way.
+async fn check_for_update(app: tauri::AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+    let Ok(updater) = app.updater() else { return };
+    let Ok(Some(update)) = updater.check().await else { return };
+    let window = app.get_webview_window("main");
+    let dialog = || {
+        let d = rfd::AsyncMessageDialog::new().set_title("Halo");
+        match &window {
+            Some(w) => d.set_parent(w),
+            None => d,
+        }
+    };
+    let notes = update.body.as_deref().map(|b| format!("\n\n{}", b.trim())).unwrap_or_default();
+    let answer = dialog()
+        .set_description(format!(
+            "Halo {} is available (you have {}).{notes}\n\nInstall it now? Halo will close and reopen. \
+             Your projects are saved; an export in progress would be stopped.",
+            update.version, update.current_version
+        ))
+        .set_buttons(rfd::MessageButtons::YesNo)
+        .show()
+        .await;
+    if answer != rfd::MessageDialogResult::Yes {
+        return;
+    }
+    match update.download_and_install(|_, _| {}, || {}).await {
+        Ok(()) => app.restart(),
+        Err(e) => {
+            dialog()
+                .set_level(rfd::MessageLevel::Error)
+                .set_description(format!("The update couldn't be installed.\n\n{e}"))
+                .show()
+                .await;
+        }
+    }
 }
 
 /// Scratch files (caption files for exports) only live as long as this app instance.

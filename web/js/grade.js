@@ -23,6 +23,9 @@ export const DEFAULT_LOOK = {
   shadowSat: 0,
   highlightHue: 0,
   highlightSat: 0,
+  /** Per-colour hue, saturation and luminance, like Lightroom's HSL panel: null, or an object of
+      bands (`HSL_BANDS`) to { h: degrees, s: -1..1, l: -1..1 }. Only looks set it. */
+  hsl: null,
   /** An imported LUT, { id, name }, from Halo's LUT library. */
   lut: null,
   lutAmount: 1,
@@ -33,29 +36,29 @@ export const LOOKS = [
   { id: "warm", name: "Warm", look: { temperature: 0.35, tint: 0.05, vibrance: 0.1 } },
   { id: "cool", name: "Cool", look: { temperature: -0.35, contrast: 0.1 } },
   { id: "punchy", name: "Punchy", look: { contrast: 0.35, saturation: 0.18, highlights: -0.15, shadows: -0.05 } },
-  { id: "golden", name: "Golden hour", look: { temperature: 0.5, tint: 0.08, highlights: -0.2, shadows: 0.15, saturation: 0.08 } },
+  { id: "golden", name: "Golden hour", look: { temperature: 0.5, tint: 0.08, highlights: -0.2, shadows: 0.15, saturation: 0.08, highlightHue: 40, highlightSat: 0.25, hsl: { orange: { s: 0.1 }, yellow: { h: -10, s: 0.15 }, green: { h: -25, s: -0.15 }, blue: { s: -0.25 } } } },
   { id: "faded", name: "Faded", look: { fade: 0.5, contrast: -0.15, saturation: -0.2 } },
-  { id: "moody", name: "Moody", look: { exposure: -0.2, contrast: 0.25, temperature: -0.15, saturation: -0.25, shadows: -0.15 } },
+  { id: "moody", name: "Moody", look: { exposure: -0.2, contrast: 0.25, temperature: -0.15, saturation: -0.25, shadows: -0.15, hsl: { orange: { s: -0.05 }, yellow: { s: -0.3 }, green: { h: 15, s: -0.4, l: -0.2 }, blue: { s: -0.3, l: -0.15 } } } },
   { id: "mono", name: "Black & white", look: { saturation: -1, contrast: 0.2 } },
-  { id: "orangeblue", name: "Orange & Blue", look: { contrast: 0.12, vibrance: 0.18, saturation: 0.06, shadowHue: 200, shadowSat: 0.3, highlightHue: 32, highlightSat: 0.32 } },
-  { id: "speakeasy", name: "Speakeasy", look: { temperature: 0.35, tint: 0.04, saturation: -0.2, vibrance: -0.05, contrast: 0.1, fade: 0.22, highlights: -0.12, shadows: 0.1, shadowHue: 35, shadowSat: 0.16, highlightHue: 45, highlightSat: 0.18 } },
-  { id: "indoorvintage", name: "Indoor Vintage", look: { temperature: 0.2, tint: -0.05, saturation: -0.28, contrast: -0.12, fade: 0.3, highlights: -0.12, shadows: 0.12, shadowHue: 45, shadowSat: 0.16, highlightHue: 50, highlightSat: 0.14 } },
-  { id: "journey", name: "Journey", look: { temperature: -0.08, vibrance: 0.28, saturation: 0.06, contrast: 0.1, highlights: -0.08, fade: 0.06, shadowHue: 198, shadowSat: 0.16, highlightHue: 40, highlightSat: 0.1 } },
-  { id: "sicily", name: "Sicily", look: { temperature: 0.45, tint: 0.05, saturation: 0.1, vibrance: 0.12, contrast: 0.04, fade: 0.12, highlights: -0.18, shadows: 0.1, shadowHue: 40, shadowSat: 0.1, highlightHue: 38, highlightSat: 0.22 } },
+  { id: "orangeblue", name: "Orange & Blue", look: { contrast: 0.22, vibrance: 0.12, saturation: 0.04, highlights: -0.12, shadows: -0.04, shadowHue: 195, shadowSat: 0.32, highlightHue: 30, highlightSat: 0.32, hsl: { red: { h: 8 }, orange: { s: 0.15 }, yellow: { h: -22, s: -0.1 }, green: { h: 55, s: -0.25 }, aqua: { h: 8, s: 0.2 }, blue: { h: -20, s: 0.1 }, purple: { h: -30, s: -0.3 }, magenta: { h: 40, s: -0.2 } } } },
+  { id: "speakeasy", name: "Speakeasy", look: { exposure: -0.2, contrast: 0.28, temperature: 0.25, saturation: -0.1, highlights: -0.15, shadows: -0.12, fade: 0.1, shadowHue: 30, shadowSat: 0.25, highlightHue: 38, highlightSat: 0.4, hsl: { red: { h: 10, s: -0.1 }, orange: { s: 0.05 }, yellow: { h: -10 }, green: { h: -35, s: -0.45 }, aqua: { h: -20, s: -0.5 }, blue: { s: -0.6 }, purple: { s: -0.6 }, magenta: { s: -0.5 } } } },
+  { id: "indoorvintage", name: "Indoor Vintage", look: { temperature: 0.2, tint: -0.02, contrast: 0.06, fade: 0.32, saturation: -0.15, highlights: -0.2, shadows: 0.05, shadowHue: 55, shadowSat: 0.16, highlightHue: 40, highlightSat: 0.3, hsl: { red: { s: -0.15 }, orange: { s: 0.05 }, green: { h: -20, s: -0.3 }, aqua: { s: -0.3 }, blue: { h: -15, s: -0.4 }, magenta: { s: -0.4 } } } },
+  { id: "journey", name: "Journey", look: { contrast: 0.18, vibrance: 0.15, saturation: -0.08, temperature: 0.05, highlights: -0.18, shadows: 0.08, fade: 0.1, shadowHue: 190, shadowSat: 0.22, highlightHue: 38, highlightSat: 0.25, hsl: { orange: { s: 0.1, l: 0.05 }, yellow: { h: -12, s: -0.15 }, green: { h: 25, s: -0.25, l: -0.15 }, aqua: { s: 0.1 }, blue: { h: -15, s: 0.1, l: -0.1 } } } },
+  { id: "sicily", name: "Sicily", look: { exposure: 0.08, temperature: 0.3, tint: 0.06, contrast: 0.12, saturation: 0.08, vibrance: 0.2, highlights: -0.15, shadows: 0.15, fade: 0.08, shadowHue: 25, shadowSat: 0.2, highlightHue: 42, highlightSat: 0.28, hsl: { red: { h: 6 }, orange: { s: 0.12, l: 0.05 }, yellow: { h: -8, s: 0.1 }, green: { h: -25, s: -0.15 }, aqua: { s: 0.15 }, blue: { h: -25, s: 0.2 } } } },
   { id: "noir", name: "Noir", look: { saturation: -1, contrast: 0.35, fade: 0.15, shadows: -0.1, exposure: -0.05 } },
   { id: "pastel", name: "Pastel", look: { contrast: -0.18, saturation: -0.15, fade: 0.35, highlights: -0.15, vibrance: 0.1 } },
-  { id: "film", name: "Film", look: { contrast: 0.08, saturation: -0.1, fade: 0.18, temperature: -0.05, shadowHue: 210, shadowSat: 0.12, highlightHue: 45, highlightSat: 0.12 } },
-  { id: "teal", name: "Teal", look: { temperature: -0.3, tint: -0.05, saturation: 0.06, contrast: 0.1, shadowHue: 200, shadowSat: 0.22 } },
+  { id: "film", name: "Film", look: { contrast: 0.08, saturation: -0.1, fade: 0.18, temperature: -0.05, shadowHue: 210, shadowSat: 0.12, highlightHue: 45, highlightSat: 0.12, hsl: { orange: { s: 0.05 }, yellow: { h: -10, s: -0.15 }, green: { h: 20, s: -0.3 }, blue: { s: -0.2 } } } },
+  { id: "teal", name: "Teal", look: { temperature: -0.3, tint: -0.05, saturation: 0.06, contrast: 0.1, shadowHue: 200, shadowSat: 0.22, hsl: { orange: { s: 0.1 }, yellow: { h: -15 }, green: { h: 40, s: -0.2 }, blue: { h: -25 } } } },
   { id: "ember", name: "Ember", look: { temperature: 0.4, saturation: 0.15, contrast: 0.18, highlights: -0.2, fade: 0.08, shadowHue: 25, shadowSat: 0.2 } },
   { id: "bloom", name: "Bloom", look: { exposure: 0.12, highlights: -0.2, contrast: -0.08, vibrance: 0.25, fade: 0.1, temperature: 0.05 } },
   { id: "bleach", name: "Bleach Bypass", look: { saturation: -0.75, contrast: 0.45, highlights: -0.12, shadows: -0.08, exposure: 0.05, fade: 0.06 } },
-  { id: "blockbuster", name: "Blockbuster", look: { contrast: 0.28, saturation: 0.22, vibrance: 0.15, temperature: 0.08, highlights: -0.1, shadowHue: 205, shadowSat: 0.25, highlightHue: 30, highlightSat: 0.28 } },
+  { id: "blockbuster", name: "Blockbuster", look: { contrast: 0.28, saturation: 0.1, vibrance: 0.15, temperature: 0.08, highlights: -0.1, shadowHue: 205, shadowSat: 0.25, highlightHue: 30, highlightSat: 0.28, hsl: { red: { h: 12, s: -0.15 }, orange: { s: 0.05 }, green: { h: 50, s: -0.2 }, blue: { h: -20 } } } },
   { id: "moonrise", name: "Moonrise", look: { temperature: 0.3, tint: 0.04, saturation: 0.2, vibrance: 0.1, contrast: 0.14, highlights: -0.1, fade: 0.04, shadowHue: 40, shadowSat: 0.14, highlightHue: 35, highlightSat: 0.12 } },
   { id: "matrix", name: "Matrix", look: { temperature: -0.15, tint: -0.18, saturation: 0.04, contrast: 0.18, highlights: -0.08, fade: 0.06, shadowHue: 140, shadowSat: 0.2, highlightHue: 120, highlightSat: 0.08 } },
   { id: "her", name: "Her", look: { temperature: 0.22, tint: 0.16, saturation: -0.12, vibrance: 0.08, contrast: -0.04, fade: 0.2, highlights: -0.12, shadowHue: 25, shadowSat: 0.08, highlightHue: 330, highlightSat: 0.12 } },
-  { id: "kodak", name: "Kodak", look: { temperature: 0.26, tint: 0.04, saturation: 0.12, vibrance: 0.1, contrast: 0.06, fade: 0.1, highlights: -0.08, shadowHue: 35, shadowSat: 0.12, highlightHue: 40, highlightSat: 0.14 } },
-  { id: "fuji", name: "Fuji", look: { temperature: -0.2, tint: -0.05, saturation: 0.06, vibrance: 0.08, contrast: 0.04, fade: 0.08, shadowHue: 210, shadowSat: 0.1, highlightHue: 45, highlightSat: 0.06 } },
-  { id: "polaroid", name: "Polaroid", look: { temperature: 0.1, tint: 0.03, saturation: -0.16, contrast: -0.14, fade: 0.28, highlights: -0.12, vibrance: 0.06, shadowHue: 30, shadowSat: 0.06 } },
+  { id: "kodak", name: "Kodak", look: { temperature: 0.26, tint: 0.04, saturation: 0.12, vibrance: 0.1, contrast: 0.12, fade: 0.1, highlights: -0.08, shadowHue: 35, shadowSat: 0.12, highlightHue: 40, highlightSat: 0.14, hsl: { red: { s: 0.1 }, orange: { s: 0.1 }, yellow: { h: -8, s: 0.1 }, green: { h: -20, s: -0.1 }, blue: { h: -15 } } } },
+  { id: "fuji", name: "Fuji", look: { temperature: -0.2, tint: -0.05, saturation: 0.06, vibrance: 0.08, contrast: 0.1, fade: 0.08, shadowHue: 210, shadowSat: 0.1, highlightHue: 45, highlightSat: 0.06, hsl: { red: { h: -5, s: -0.1 }, orange: { s: -0.05 }, green: { h: 15, s: 0.05 }, aqua: { s: 0.1 }, blue: { h: -10, s: 0.1 } } } },
+  { id: "polaroid", name: "Polaroid", look: { temperature: 0.1, tint: 0.03, saturation: -0.16, contrast: -0.14, fade: 0.28, highlights: -0.12, vibrance: 0.06, shadowHue: 30, shadowSat: 0.06, highlightHue: 50, highlightSat: 0.15, hsl: { green: { h: -15, s: -0.25 }, aqua: { h: -20 }, blue: { h: -20, s: -0.2 } } } },
 ];
 
 export function makeLook(partial = {}) {
@@ -76,8 +79,44 @@ const luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
 /** A fully saturated colour for a hue in degrees, in display values 0 to 1. */
 function hueColor(h) {
+  h = ((h % 360) + 360) % 360;
   const x = 1 - Math.abs(((h / 60) % 2) - 1);
   return h < 60 ? [1, x, 0] : h < 120 ? [x, 1, 0] : h < 180 ? [0, 1, x] : h < 240 ? [0, x, 1] : h < 300 ? [x, 0, 1] : [1, 0, x];
+}
+
+/** Where each HSL band sits on the hue wheel, in degrees; colours between two bands blend them. */
+export const HSL_BANDS = { red: 0, orange: 30, yellow: 60, green: 120, aqua: 180, blue: 225, purple: 270, magenta: 315 };
+const BAND_ORDER = Object.entries(HSL_BANDS);
+
+/**
+ * The HSL mixer: each colour takes the adjustments of the two bands either side of its hue,
+ * blended by how close it is to each. Greys have no hue and are left alone.
+ */
+function mixHsl([r, g, b], hsl) {
+  const max = Math.max(r, g, b);
+  const chroma = max - Math.min(r, g, b);
+  if (chroma < 1e-5) return [r, g, b];
+  let h = max === r ? ((g - b) / chroma) % 6 : max === g ? (b - r) / chroma + 2 : (r - g) / chroma + 4;
+  h = ((h * 60) + 360) % 360;
+  let i = BAND_ORDER.length - 1;
+  while (i > 0 && BAND_ORDER[i][1] > h) i--;
+  const [nameA, at] = BAND_ORDER[i];
+  const [nameB, next] = BAND_ORDER[(i + 1) % BAND_ORDER.length];
+  const span = (next - at + 360) % 360 || 360;
+  const t = smooth(0, 1, ((h - at + 360) % 360) / span);
+  const a = hsl[nameA] ?? {};
+  const bb = hsl[nameB] ?? {};
+  const mix = (k) => (a[k] ?? 0) * (1 - t) + (bb[k] ?? 0) * t;
+  const [dh, ds, dl] = [mix("h"), mix("s"), mix("l")];
+  // Rotate the colour's chroma around its own grey, so a hue shift keeps its brightness.
+  const l = luma(r, g, b);
+  const s = max > 0 ? chroma / max : 0;
+  const shifted = hueColor(h + dh);
+  const sl = luma(...shifted);
+  const amount = chroma * Math.max(0, 1 + ds);
+  // Luminance moves coloured pixels only, in proportion to how coloured they are.
+  const lum = l * (1 + dl * 0.5 * s);
+  return shifted.map((c) => lum + (c - sl) * amount);
 }
 
 /**
@@ -114,21 +153,22 @@ function adjust([r, g, b], look) {
   const s = Math.max(0, (1 + look.saturation) * (1 + look.vibrance * (1 - sat) * 0.9));
   [r, g, b] = [r, g, b].map((c) => l2 + (c - l2) * s);
 
-  // Split-toning: shadows drift toward one hue, highlights toward another, weighted by how dark
-  // or bright they are. The crossover sits around the mid-tones so the two casts don't fight.
+  if (look.hsl) [r, g, b] = mixHsl([r, g, b].map(clamp01), look.hsl);
+
+  // Split-toning: shadows take on one hue, highlights another, weighted by how dark or bright
+  // they are. Only the colour moves, not the brightness, so it tints rather than washes; the
+  // tint fades out toward pure black and white so those stay clean.
   const ss = look.shadowSat ?? 0;
   const hs = look.highlightSat ?? 0;
   if (ss > 0 || hs > 0) {
-    const l3 = luma(r, g, b);
-    const wSh = 1 - smooth(0.3, 0.72, l3);
-    const wHi = smooth(0.3, 0.72, l3);
+    const l3 = clamp01(luma(r, g, b));
+    const wSh = (1 - smooth(0.25, 0.7, l3)) * smooth(0, 0.12, l3) * ss * 0.6;
+    const wHi = smooth(0.3, 0.75, l3) * (1 - smooth(0.9, 1, l3) * 0.6) * hs * 0.6;
     const st = hueColor(look.shadowHue ?? 0);
     const ht = hueColor(look.highlightHue ?? 0);
-    [r, g, b] = [
-      clamp01(r + (st[0] - r) * ss * wSh + (ht[0] - r) * hs * wHi),
-      clamp01(g + (st[1] - g) * ss * wSh + (ht[1] - g) * hs * wHi),
-      clamp01(b + (st[2] - b) * ss * wSh + (ht[2] - b) * hs * wHi),
-    ];
+    const stl = luma(...st);
+    const htl = luma(...ht);
+    [r, g, b] = [0, 1, 2].map((i) => clamp01([r, g, b][i] + (st[i] - stl) * wSh + (ht[i] - htl) * wHi));
   }
 
   // Fade lifts the blacks and softens the whites, like old film.
@@ -220,9 +260,9 @@ export function parseCube(text) {
 }
 
 /**
- * Reads a Lightroom or Camera Raw preset (.xmp) into a look. Halo's sliders are simpler than
- * Lightroom's, so this brings over the basics: exposure, contrast, highlights, shadows, white
- * balance, saturation and vibrance.
+ * Reads a Lightroom or Camera Raw preset (.xmp) into a look: exposure, contrast, highlights,
+ * shadows, white balance, saturation, vibrance, split toning and the HSL panel. Curves, grain
+ * and the rest have no equivalent in Halo and are skipped.
  */
 export function parseXmp(text, fallbackName) {
   const doc = new DOMParser().parseFromString(text, "application/xml");
@@ -245,6 +285,22 @@ export function parseXmp(text, fallbackName) {
       ?? (num("Temperature") != null ? Math.max(-1, Math.min(1, (num("Temperature") - 5500) / 3000)) : undefined),
     tint: pct("IncrementalTint") ?? (num("Tint") != null ? Math.max(-1, Math.min(1, num("Tint") / 100)) : undefined),
   };
+  // Split toning (or the newer colour grading wheels, which store the same thing).
+  for (const [part, key] of [["Shadow", "shadow"], ["Highlight", "highlight"]]) {
+    const hue = num(`SplitToning${part}Hue`) ?? num(`ColorGrade${part}Hue`);
+    const sat = num(`SplitToning${part}Saturation`) ?? num(`ColorGrade${part}Sat`);
+    if (hue != null && sat) Object.assign(look, { [`${key}Hue`]: hue, [`${key}Sat`]: Math.min(1, sat / 100) });
+  }
+  // The HSL panel. Lightroom's hue slider at ±100 turns a colour about 30° toward its neighbour.
+  const hsl = {};
+  for (const band of Object.keys(HSL_BANDS)) {
+    const name = band[0].toUpperCase() + band.slice(1);
+    const h = num(`HueAdjustment${name}`);
+    const s = pct(`SaturationAdjustment${name}`);
+    const l = pct(`LuminanceAdjustment${name}`);
+    if (h || s || l) hsl[band] = { h: (h ?? 0) * 0.3, s: s ?? 0, l: l ?? 0 };
+  }
+  if (Object.keys(hsl).length) look.hsl = hsl;
   for (const k of Object.keys(look)) if (look[k] === undefined) delete look[k];
   if (!Object.keys(look).length) throw new Error("That preset has no settings Halo can use.");
   if (look.exposure != null) look.exposure = Math.max(-3, Math.min(3, look.exposure));
