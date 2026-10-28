@@ -2,7 +2,7 @@
 // LUT), built-in and saved looks, and importing LUTs and Lightroom presets. Sections show on the
 // timeline's Color track, where they're moved and trimmed; the player draws them live.
 
-import { DEFAULT_LOOK, LOOKS, createGradePlayer, importLut, isNeutral, loadLut, makeLook, paintSwatch, parseXmp, sectionAt } from "./grade.js";
+import { CHUNK_SECS, DEFAULT_LOOK, LOOKS, createGradePlayer, freeSpan, importLut, isNeutral, loadLut, makeLook, paintSwatch, parseXmp, sectionAt } from "./grade.js";
 import { createScopes } from "./scopes.js";
 
 const $ = (id) => document.getElementById(id);
@@ -27,18 +27,17 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     }, { coalesce });
   }
 
-  /** Adds a section in the free stretch around the playhead (the whole video when there are none). */
-  function addSection(look = makeLook(), name = "Graded", preset = null) {
-    const t = video.currentTime;
-    const sections = store.doc.grade.sections;
-    if (sectionAt(store.doc.grade, t)) {
+  /**
+   * Adds a section at `t` (the playhead by default): `CHUNK_SECS` long, or out to `to` when it was
+   * drawn on the Color track, either way kept to the free time there.
+   */
+  function addSection(look = makeLook(), name = "Graded", preset = null, t = video.currentTime, to = null) {
+    const span = freeSpan(store.doc.grade, video.duration || 0, t, to);
+    if (!span) {
       toast("The playhead is in a graded section already. Select it on the Color track, or split it.");
       return null;
     }
-    const before = sections.filter((s) => s.end <= t).at(-1);
-    const after = sections.find((s) => s.start > t);
-    const start = before ? before.end : 0;
-    const end = after ? after.start : video.duration || 0;
+    const [start, end] = span;
     if (end - start < 0.2) { toast("There isn't room for a section here."); return null; }
     let id;
     store.update((d) => {
@@ -72,13 +71,13 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     $("grade-editor").hidden = !s;
     $("grade-tools").hidden = !s;
     $("grade-add").parentElement.hidden = !!s;
-    $("grade-add-label").textContent = sections.length ? "Grade from the playhead" : "Grade the whole video";
+    $("grade-add-label").textContent = `Add a ${CHUNK_SECS}s grade at the playhead`;
     $("grade-where").textContent = s ? `${clock(s.start)} – ${clock(s.end)}` : "";
     $("grade-hint").textContent = s
       ? "Changes apply to this section. Drag it or its edges on the Color track to change where it starts and ends."
       : sections.length
-        ? "Select a section on the Color track to edit it. Ctrl+K splits at the playhead, Delete removes a grade."
-        : "Grade the whole video, then split it with Ctrl+K to grade parts differently.";
+        ? "Select a section on the Color track to edit it, or drag along an empty stretch of the track to grade just that part."
+        : `Drag along the Color track to grade just that stretch, or double-click it for a ${CHUNK_SECS}-second grade. Drag a grade's edges to resize it.`;
     if (!s) return;
     const look = { ...DEFAULT_LOOK, ...s.look };
     for (const key of SLIDERS) {
@@ -212,6 +211,7 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     });
   }
 
+  timeline.onGradeAdd = (t, to) => addSection(makeLook(), "Graded", null, t, to);
   timeline.onGradeSplit = splitAtPlayhead;
   timeline.onGradeDelete = deleteSection;
   timeline.onGradeReset = resetSection;

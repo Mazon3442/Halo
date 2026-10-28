@@ -407,6 +407,7 @@ dialog[open] { animation: rise .16s var(--ease); }
   background: linear-gradient(90deg, #5b3a1e, #3b2c4f); border: 1px solid #b07a3c; color: #ffe6c7; font-size: 11px;
 }
 .tl-grade:hover { filter: brightness(1.15); }
+.tl-grade.drawing { opacity: 0.6; border-style: dashed; pointer-events: none; }
 .tl-grade.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); z-index: 2; }
 .tl-grade.selected .tl-trim { background: #7cc4ff40; }
 .workspace.on-color .tl-row.grade { cursor: crosshair; }

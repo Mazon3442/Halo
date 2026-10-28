@@ -7,6 +7,7 @@ import {
   MIN_WORD, deleteLines, editLine, groupLines, insertLine, lineTimes, lockLine, mergeLines, moveLines,
   retimeLine, setWordBoundary, splitLine,
 } from "./captions.js";
+import { freeSpan } from "./grade.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_PX_PER_SEC = 800;
@@ -51,7 +52,9 @@ export class Timeline {
   constructor({ store, video, toast, onSelectionChange, onSeek, onGradeSelect }) {
     this.store = store;
     this.onGradeSelect = onGradeSelect;
-    /** Colour-track actions the panel fills in: split at the playhead, remove a grade, reset a look. */
+    /** Colour-track actions the panel fills in: add a grade (at a time, optionally drawn out to
+        another), split at the playhead, remove a grade, reset a look. */
+    this.onGradeAdd = null;
     this.onGradeSplit = null;
     this.onGradeDelete = null;
     this.onGradeReset = null;
@@ -488,6 +491,9 @@ export class Timeline {
     this.track.addEventListener("pointerdown", (ev) => this.#pointerDown(ev));
     this.grades.addEventListener("pointerdown", (ev) => this.#gradeDown(ev));
     this.grades.addEventListener("contextmenu", (ev) => this.#gradeContext(ev));
+    this.grades.addEventListener("dblclick", (ev) => {
+      if (!ev.target.closest(".tl-grade")) this.onGradeAdd?.(this.#timeAt(ev.clientX), null);
+    });
     document.addEventListener("pointerdown", (ev) => {
       if (!$("context-menu").hidden && !ev.target.closest("#context-menu")) this.#closeMenu();
     }, true);
@@ -702,9 +708,12 @@ export class Timeline {
     if (ev.button !== 0) return;
     const block = ev.target.closest(".tl-grade");
     if (!block) {
-      // Empty track: deselect and move the playhead there.
+      // Empty track: deselect and move the playhead there; dragging draws out a new section.
       this.selectGrade(null);
-      this.onSeek(this.#timeAt(ev.clientX));
+      const t0 = this.#timeAt(ev.clientX);
+      this.onSeek(t0);
+      if (!freeSpan(this.store.doc?.grade, this.#duration, t0)) return;
+      this.#drawGrade(ev, t0);
       return;
     }
     const id = Number(block.dataset.id);
@@ -746,6 +755,35 @@ export class Timeline {
         const x = d.grade.sections.find((g) => g.id === id);
         if (x) { x.start = drag.start; x.end = drag.end; }
       });
+    };
+    this.grades.addEventListener("pointermove", move);
+    this.grades.addEventListener("pointerup", up, { once: true });
+    this.grades.addEventListener("pointercancel", up, { once: true });
+  }
+
+  /** Draws a new section from `t0` to wherever the pointer is let go, kept to the free time there. */
+  #drawGrade(ev, t0) {
+    const startX = ev.clientX;
+    capture(this.grades, ev.pointerId);
+    let span = null;
+    let ghost = null;
+    const move = (e) => {
+      if (!ghost && Math.abs(e.clientX - startX) < DRAG_THRESHOLD_PX) return;
+      if (!ghost) {
+        ghost = document.createElement("div");
+        ghost.className = "tl-grade drawing";
+        this.grades.append(ghost);
+      }
+      span = freeSpan(this.store.doc.grade, this.#duration, t0, this.#timeAt(e.clientX));
+      ghost.style.left = `${span[0] * this.px}px`;
+      ghost.style.width = `${(span[1] - span[0]) * this.px}px`;
+    };
+    const up = () => {
+      this.grades.removeEventListener("pointermove", move);
+      this.grades.removeEventListener("pointerup", up);
+      this.grades.removeEventListener("pointercancel", up);
+      ghost?.remove();
+      if (span && span[1] - span[0] >= MIN_GRADE_SECS) this.onGradeAdd?.(span[0], span[1]);
     };
     this.grades.addEventListener("pointermove", move);
     this.grades.addEventListener("pointerup", up, { once: true });

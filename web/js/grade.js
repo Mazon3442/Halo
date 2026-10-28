@@ -342,6 +342,24 @@ export function sectionAt(grade, t) {
   return grade?.sections?.find((s) => t >= s.start && t < s.end) ?? null;
 }
 
+/** How long a new graded section is when it isn't drawn out on the timeline. */
+export const CHUNK_SECS = 5;
+
+/**
+ * Where a new section anchored at `t` goes, as [start, end], kept inside the free time around `t`.
+ * With `to` it spans from `t` to there (either direction); without, it's `CHUNK_SECS` long from `t`,
+ * slid back if the next section or the end of the video is closer. Null when `t` is in a section.
+ */
+export function freeSpan(grade, duration, t, to = null) {
+  const sections = grade?.sections ?? [];
+  if (sectionAt(grade, t)) return null;
+  const lo = sections.filter((s) => s.end <= t).at(-1)?.end ?? 0;
+  const hi = sections.find((s) => s.start > t)?.start ?? duration;
+  if (to != null) return [Math.max(lo, Math.min(t, to)), Math.min(hi, Math.max(t, to))];
+  const end = Math.min(hi, t + CHUNK_SECS);
+  return [Math.max(lo, Math.min(t, end - CHUNK_SECS)), end];
+}
+
 /** What the export needs: each section with something to do, as a baked .cube. */
 export async function bakeSections(grade) {
   const out = [];
