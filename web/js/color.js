@@ -314,6 +314,10 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     }
   }
 
+  // currentTime changes as soon as a seek starts, before the new frame is decoded; draw again once it is,
+  // or a paused, slow-decoding video keeps the stale (often black) frame.
+  video.addEventListener("seeked", () => { drawn = ""; });
+
   /* ---------- scopes ---------- */
 
   const scopeOverlay = $("scopes");
