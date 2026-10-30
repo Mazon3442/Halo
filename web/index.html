@@ -189,6 +189,12 @@
 
       <section class="scroll" id="panel-color" role="tabpanel" aria-labelledby="tab-color" hidden>
         <div class="group">
+          <div class="group-title"><label for="grade-source">Footage</label></div>
+          <select id="grade-source"></select>
+          <p class="hint" id="grade-source-hint"></p>
+        </div>
+
+        <div class="group">
           <div class="group-title"><span>Section</span><span id="grade-where"></span></div>
           <p class="hint" id="grade-hint"></p>
           <div class="field-row">
@@ -210,6 +216,24 @@
               <input type="file" id="grade-import-file" accept=".cube,.xmp" multiple hidden>
             </div>
             <p class="hint">Import a .cube LUT from Premiere, Resolve, Final Cut or CapCut, or a Lightroom preset (.xmp).</p>
+          </div>
+
+          <div class="group">
+            <div class="group-title">Film</div>
+            <select id="grade-film" aria-label="Film emulation"></select>
+            <div class="slider-row" id="grade-film-amount-row">
+              <label for="grade-filmAmount">Strength</label>
+              <input type="range" id="grade-filmAmount" data-key="filmAmount" min="0" max="100" step="1">
+              <span class="value" id="grade-filmAmount-v"></span>
+            </div>
+            <p class="hint">Print film curves. Small differences between their red, green and blue responses give film its color: cooler shadows and warmer highlights, without a tint over the picture.</p>
+          </div>
+
+          <div class="group">
+            <div class="group-title">Color wheels</div>
+            <div class="wheels" id="grade-wheels"></div>
+            <div class="slider-row"><label for="grade-skinProtect">Protect skin</label><input type="range" id="grade-skinProtect" data-key="skinProtect" min="0" max="100" step="1"><span class="value" id="grade-skinProtect-v"></span></div>
+            <p class="hint">Drag a wheel's dot toward a color to push the shadows, midtones or highlights that way. The slider under each wheel brightens or darkens that range. Double-click a wheel to reset it. Protect skin keeps faces out of the wheels' color.</p>
           </div>
 
           <div class="group">

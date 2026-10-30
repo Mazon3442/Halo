@@ -9,7 +9,7 @@ import { createExporter } from "./export.js";
 import { Timeline } from "./timeline.js";
 import { createInspector } from "./inspector.js";
 import { createColorPanel } from "./color.js";
-import { bakeSections } from "./grade.js";
+import { bakeSections, needsTransform } from "./grade.js";
 import { normalizeStyle } from "./styles.js";
 import { loadUserPlugins } from "./plugins/registry.js";
 
@@ -75,7 +75,7 @@ function isTyping(el) {
 
 const savePrefs = () => api.put("/prefs", prefs).catch(() => {});
 const exporter = createExporter({
-  store, getMedia: () => media, getPrefs: () => prefs, savePrefs, toast, bakeGrades: () => bakeSections(store.doc.grade),
+  store, getMedia: () => media, getPrefs: () => prefs, savePrefs, toast, bakeGrades: () => bakeSections(store.doc.grade, media?.duration ?? 0),
 });
 const timeline = new Timeline({
   store,
@@ -350,7 +350,7 @@ function canCompare() {
   const doc = store.doc;
   if (!doc) return false;
   if (tab === "background") return doc.background.mode !== "none";
-  return tab === "color" && doc.grade.sections.length > 0;
+  return tab === "color" && (doc.grade.sections.length > 0 || needsTransform(doc.grade));
 }
 
 function updateEffect() {

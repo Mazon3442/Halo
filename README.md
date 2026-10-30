@@ -30,7 +30,7 @@
 | **19 caption styles** | Pop, Loud, Karaoke, Box, One word, Glow and more, each one a starting point for font, color, outline, shadow, box and animation. Save your own next to them, and drag any of them onto single captions on the timeline. |
 | **Easy Motion and plugins** | Caption animations come from plugins. The built-in Easy Motion gives each caption an in and an out (direction, style, distance, frames), extras (scale, rotation, 3D tilt, blur, tracking, fade), a hold effect (float, slow push, pulse, swing, shake) and motion blur, with 17 presets. Add your own plugins as .js files. |
 | **Clean up in one pass** | Remove filler words ("um", "uh", "like") across the whole video, fix a misheard name everywhere with find and replace, or import an SRT you already have. |
-| **Color grading** | 27 looks, including Golden hour, Orange & Blue, Speakeasy, Kodak and Noir. Grade the whole video or just a stretch of it, add a .cube LUT or a Lightroom preset, and check the result on a waveform, RGB parade, vectorscope or histogram. |
+| **Color grading** | Graded the way a colorist works: log footage (Apple Log, S-Log3, V-Log, LogC3, Canon Log 3, D-Log) converted first, then grading in log with real white balance, pivoted contrast, shadow/midtone/highlight color wheels that keep skin tones clean, and print film emulation (Kodak 2383 and 2393, Fuji 3513, Vision3, bleach bypass, black and white). 16 looks built from those, previewed on your own frame. Grade the whole video or just a stretch of it, add a .cube LUT or a Lightroom preset, and check the result on a waveform, RGB parade, vectorscope or histogram. |
 | **A real timeline** | Stacked caption tracks, plus color, video and audio tracks with thumbnails, a waveform and snapping. Drag captions in time or between tracks, Alt-drag to copy, copy and paste, trim, split and merge, retime single words, lock and hide tracks, and draw color grades straight onto the track. |
 | **Exports that match the preview** | MP4 (H.264 or H.265, on NVENC when there is one), ProRes or WebM, with captions burned in or saved alongside as SRT. Transparent backgrounds export as ProRes 4444 or WebM with alpha. |
 | **Projects that keep themselves** | Every video gets an autosaved project, so reopening it brings your edits back. Everything is undoable. |
@@ -99,10 +99,14 @@ a frame at a time into the subtitle file, so the export moves exactly as the pre
 in `%APPDATA%\com.mazon.halo\plugins` (the Plugins folder button opens it) and they show up in the
 Animation menu next time Halo starts. [docs/plugins.md](docs/plugins.md) explains how to write one.
 
-**Color tab:** grades live on the Color track. Drag along an empty stretch of it to draw a grade of
+**Color tab:** first, say what the footage was shot in. Log footage (Apple Log on iPhone, Sony S-Log3,
+Panasonic V-Log, ARRI LogC3, Canon Log 3, DJI D-Log) looks flat and grey. Halo converts it from the
+camera's log curve and gamut across the whole video before any grading, as a color space transform does
+in Resolve. Grades live on the Color track. Drag along an empty stretch of it to draw a grade of
 that length, or double-click it (or press "Add a 5s grade at the playhead") for a five-second one;
 drag a grade or its edges to move it, and split it at the playhead. Each grade takes a look, light and
-color sliders, and optionally a LUT: import a .cube file from Premiere, Resolve, Final Cut or CapCut,
+color sliders, a print film emulation, three color wheels (shadows, midtones, highlights) with skin
+protection, and optionally a LUT: import a .cube file from Premiere, Resolve, Final Cut or CapCut,
 or a Lightroom preset (.xmp). Save a look you like to use it again. Scopes (Ctrl+Shift+S) show a
 waveform, RGB parade, vectorscope and histogram of the graded frame.
 
@@ -138,8 +142,13 @@ subtitle file, which libass renders both in the page (jassub, WebAssembly) and i
 the live preview matches the output. In Remove mode the captions are also rendered over black and
 white to recover their alpha, so text stays visible over the transparent background.
 
-**Color grades** are baked into a 33×33×33 3D LUT: the look's sliders, split toning and any imported
-LUT, in that order. The preview applies it to the video with WebGL, and the export applies the same
+**Color grades** follow a colorist's pipeline, baked into a 33×33×33 3D LUT: the input transform (log
+curve and camera gamut to light), exposure and white balance as a Bradford chromatic adaptation,
+then grading in the ACEScct log space (contrast around mid grey, tone, color wheels weighted by
+brightness with skin tones keyed out), print film emulation (a density curve per channel, whose small
+differences give film its color crossover), saturation on light, the HSL mixer, a filmic tone map
+for log footage, and out-of-range colors pulled in along their own hue rather than clipped per
+channel. Any imported LUT comes last. The preview applies it to the video with WebGL, and the export applies the same
 LUT with ffmpeg's `lut3d`, so what you see is what you get.
 
 **Exports** run as three overlapping stages: ffmpeg decoding, GPU inference, and compositing plus

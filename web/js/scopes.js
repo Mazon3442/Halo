@@ -22,6 +22,7 @@ export function createScopes({ frame }) {
 
   let visible = false;
   let look = null;
+  let source = "rec709";
   let lut = null;
   let pending = false;
   let lastAt = 0;
@@ -32,9 +33,10 @@ export function createScopes({ frame }) {
   }
 
   /** Grades the scope readout: `look` is the section's look, `lut` its resolved LUT (or null). */
-  function setGrade(nextLook, nextLut) {
-    if (nextLook === look && nextLut === lut) return;
+  function setGrade(nextLook, nextLut, nextSource = "rec709") {
+    if (nextLook === look && nextLut === lut && nextSource === source) return;
     look = nextLook;
+    source = nextSource;
     lut = nextLut;
     requestAnalyze();
   }
@@ -76,7 +78,7 @@ export function createScopes({ frame }) {
 
     // Grade the sample the way the player does, so the scopes read the graded picture.
     const graded = new Float32Array(W * sh * 3);
-    const apply = look ? (r, g, b) => gradeColor([r, g, b], look, lut) : null;
+    const apply = look ? (r, g, b) => gradeColor([r, g, b], look, lut, source) : null;
     for (let i = 0, k = 0; i < data.length; i += 4, k += 3) {
       let r = data[i];
       let g = data[i + 1];
