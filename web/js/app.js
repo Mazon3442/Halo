@@ -13,6 +13,7 @@ import { bakeSections, needsTransform } from "./grade.js";
 import { normalizeStyle } from "./styles.js";
 import { loadUserPlugins } from "./plugins/registry.js";
 import { editableValue } from "./scrub.js";
+import { createColorPicker } from "./colorpicker.js";
 
 const $ = (id) => document.getElementById(id);
 const video = $("video");
@@ -114,6 +115,8 @@ const timeline = new Timeline({
   onGradeSelect: (id) => { if (id != null && tab !== "color") setTab("color"); else color.render(); },
 });
 const inspector = createInspector({ store, timeline, video, toast });
+// Every colour well (caption colours, the background colour) opens Halo's own picker.
+createColorPicker({ getPrefs: () => prefs, savePrefs });
 const color = createColorPanel({ store, timeline, video, toast, getPrefs: () => prefs, savePrefs, isComparing: () => comparing, getMedia: () => media });
 timeline.onSplitRequest = () => splitAtPlayhead();
 

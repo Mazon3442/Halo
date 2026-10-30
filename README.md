@@ -94,7 +94,10 @@ transcription.
 size, case (as spoken, capitals, lowercase or Title Case), spacing, colors, how the spoken word stands
 out, entrance animation, outline, shadow and background box. Hide punctuation for the clean short-form
 look, and bleep swear words (f***) on screen and in caption files. Click any number beside a slider to
-type a value, or drag it sideways. Drag the caption box on the video to place captions, or its corner to resize; safe-zone
+type a value, or drag it sideways. Every colour opens Halo's picker: a saturation and brightness
+square with a hue strip, a hex field, an eyedropper that picks from anywhere on screen, common caption
+colours, and colours you save (kept for every video; right-click one to remove it). Escape puts the
+old colour back. Drag the caption box on the video to place captions, or its corner to resize; safe-zone
 guides show roughly where TikTok, Reels and Shorts put their buttons. Switch to "Selected" to give the
 captions selected on the timeline a style and animation of their own, or drag a style or animation preset
 straight onto captions on the timeline. Select a single caption to color individual words.
