@@ -1,10 +1,13 @@
 // The caption style panel, plus the caption box on the player that moves and resizes captions.
-// Edits apply to every caption, or with "Selected caption" only to the one selected on the
-// timeline (its position, size and colors, and per-word emphasis).
+// Edits apply to every caption, or with "Selected" only to the captions selected on the timeline,
+// which then keep a look and animation of their own. Presets and animations can also be dragged
+// straight onto captions on the timeline.
 
 import { api } from "./api.js";
 import { groupLines, lineTimes, lineStyle, lockLine, readableOn } from "./captions.js";
-import { OVERRIDABLE, PRESETS, presetStyle, ENTRANCES } from "./styles.js";
+import { GLOBAL_ONLY, PRESETS, animation, lookOf, normalizeStyle, presetStyle } from "./styles.js";
+import { getPlugin, listPlugins, onPluginsChanged, pluginParams } from "./plugins/registry.js";
+import { makeDraggable } from "./dragdrop.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -81,39 +84,69 @@ export function createInspector({ store, timeline, video, toast }) {
     return f ? api.fontUrl(f.id) : null;
   }
 
-  /* ---------- the selected caption ---------- */
+  /* ---------- the selected captions ---------- */
 
-  function selectedLine(doc = store.doc) {
-    if (!doc || timeline.selection.size !== 1) return null;
-    const [id] = timeline.selection;
+  /** Lines whose first word has one of `ids`, in time order. */
+  function linesByIds(doc, ids) {
     const { words } = doc.captions;
-    return groupLines(words, doc.captions.perLine).find((l) => words[l.from].id === id) ?? null;
+    return groupLines(words, doc.captions.perLine).filter((l) => ids.has(words[l.from].id));
   }
 
-  /** The style the controls show: the overall style, or the selected caption's. */
+  function selectedLines(doc = store.doc) {
+    if (!doc || !timeline.selection.size) return [];
+    return linesByIds(doc, timeline.selection);
+  }
+
+  /** The one selected caption, for per-word emphasis; null with none or several selected. */
+  function selectedLine(doc = store.doc) {
+    const lines = selectedLines(doc);
+    return lines.length === 1 ? lines[0] : null;
+  }
+
+  /** The style the controls show: the overall style, or the first selected caption's. */
   function shownStyle() {
     const cap = store.doc.captions;
     if (scope === "one") {
-      const line = selectedLine();
+      const [line] = selectedLines();
       if (line) return lineStyle(cap, cap.words, line);
     }
     return cap.style;
   }
 
-  /** Writes one style field to the overall style or to the selected caption's overrides. */
+  /**
+   * Writes one style field to the overall style or to each selected caption's own style. `value`
+   * may be a function of the current value, so each caption changes from where it was.
+   */
   function set(key, value, coalesce) {
+    const next = (current) => (typeof value === "function" ? value(current) : value);
     store.update((d) => {
       const cap = d.captions;
-      if (scope === "one" && OVERRIDABLE.includes(key)) {
-        const line = selectedLine(d);
-        if (!line) return;
-        const group = lockLine(cap, line);
-        cap.overrides ??= {};
-        cap.overrides[group] = { ...(cap.overrides[group] ?? {}), [key]: value };
+      if (scope === "one" && !GLOBAL_ONLY.includes(key)) {
+        for (const line of selectedLines(d)) {
+          const current = lineStyle(cap, cap.words, line)[key];
+          const group = lockLine(cap, line);
+          cap.overrides ??= {};
+          cap.overrides[group] = { ...(cap.overrides[group] ?? {}), [key]: next(current) };
+        }
       } else {
-        cap.style[key] = value;
+        cap.style[key] = next(cap.style[key]);
       }
     }, { coalesce: coalesce ?? `style-${key}` });
+  }
+
+  /** Gives the captions with these first-word ids a style of their own, as a drop on the timeline does. */
+  function applyTo(ids, patch, what) {
+    let count = 0;
+    store.update((d) => {
+      const cap = d.captions;
+      for (const line of linesByIds(d, new Set(ids))) {
+        const group = lockLine(cap, line);
+        cap.overrides ??= {};
+        cap.overrides[group] = { ...(cap.overrides[group] ?? {}), ...structuredClone(patch) };
+        count++;
+      }
+    });
+    if (count) toast(`${what} applied to ${count === 1 ? "1 caption" : `${count} captions`}.`, { action: "Undo", onAction: () => store.undo() });
   }
 
   /* ---------- rendering ---------- */
@@ -127,11 +160,18 @@ export function createInspector({ store, timeline, video, toast }) {
       b.setAttribute("role", "radio");
       b.dataset.id = p.id;
       b.innerHTML = `<div class="sample" aria-hidden="true">${SAMPLES[p.id]}</div><span class="name">${p.name}</span>`;
-      b.addEventListener("click", () => {
-        store.update((d) => {
-          d.captions.style = presetStyle(p.id, d.captions.style);
-          d.captions.perLine = p.perLine;
-        });
+      b.title = "Click to use, or drag onto captions on the timeline";
+      makeDraggable(b, {
+        timeline,
+        label: `${p.name} style`,
+        onClick: () => {
+          if (scope === "one") return applyTo([...timeline.selection], lookOf(presetStyle(p.id)), `“${p.name}”`);
+          store.update((d) => {
+            d.captions.style = presetStyle(p.id, d.captions.style);
+            d.captions.perLine = p.perLine;
+          });
+        },
+        onDrop: (ids) => applyTo(ids, lookOf(presetStyle(p.id)), `“${p.name}”`),
       });
       box.append(b);
     }
@@ -150,13 +190,21 @@ export function createInspector({ store, timeline, video, toast }) {
       name.className = "name";
       name.textContent = p.name;
       b.append(sample, name);
-      b.addEventListener("click", () => {
-        store.update((d) => {
-          const saved = d.captions.user_presets?.find((x) => x.id === p.id);
-          if (!saved) return;
-          d.captions.style = { ...saved.style, preset: saved.id, x: d.captions.style.x };
-          d.captions.perLine = saved.perLine;
-        });
+      b.title = "Click to use, or drag onto captions on the timeline";
+      const look = () => lookOf(normalizeStyle(p.style));
+      makeDraggable(b, {
+        timeline,
+        label: `${p.name} style`,
+        onClick: () => {
+          if (scope === "one") return applyTo([...timeline.selection], look(), `“${p.name}”`);
+          store.update((d) => {
+            const saved = d.captions.user_presets?.find((x) => x.id === p.id);
+            if (!saved) return;
+            d.captions.style = normalizeStyle({ ...saved.style, preset: saved.id, x: d.captions.style.x });
+            d.captions.perLine = saved.perLine;
+          });
+        },
+        onDrop: (ids) => applyTo(ids, look(), `“${p.name}”`),
       });
       const remove = document.createElement("button");
       remove.className = "preset-delete";
@@ -235,14 +283,17 @@ export function createInspector({ store, timeline, video, toast }) {
     renderPresets();
     const cap = doc.captions;
     const line = selectedLine();
-    if (scope === "one" && !line) scope = "all";
-    $("scope-one").disabled = !line;
+    const chosen = selectedLines().length;
+    if (scope === "one" && !chosen) scope = "all";
+    $("scope-one").disabled = !chosen;
+    $("scope-one-label").textContent = chosen > 1 ? `Selected (${chosen})` : "Selected caption";
     for (const r of document.querySelectorAll("input[name=scope]")) r.checked = r.value === scope;
     $("inspector").classList.toggle("scope-one", scope === "one");
+    $("inspector").classList.toggle("single", !!line);
     $("scope-hint").textContent = scope === "one"
-      ? "Changes here apply only to the selected caption."
-      : line ? "Changes apply to every caption." : "Changes apply to every caption. Select one on the timeline to style it on its own.";
-    $("presets-group").hidden = scope === "one";
+      ? (chosen > 1 ? `Changes here apply only to the ${chosen} selected captions.` : "Changes here apply only to the selected caption.")
+      : chosen ? "Changes apply to every caption." : "Changes apply to every caption. Select captions on the timeline to style them on their own, or drag a preset onto them.";
+    $("preset-save").hidden = scope === "one";
 
     const preset = PRESETS.find((p) => p.id === cap.style.preset) ?? null;
     const saved = preset ? null : (cap.user_presets ?? []).find((p) => p.id === cap.style.preset) ?? null;
@@ -268,7 +319,6 @@ export function createInspector({ store, timeline, video, toast }) {
     $("st-word").value = st.wordStyle;
     $("st-pop").checked = st.wordPop;
     $("st-pop").disabled = st.wordStyle === "karaoke";
-    $("st-entrance").value = st.entrance;
     const g = st.gradientColors ?? [];
     $("st-gradient").value = st.gradient;
     $("st-gradient-row").hidden = $("st-g-mid-row").hidden = st.gradient === "none";
@@ -292,6 +342,7 @@ export function createInspector({ store, timeline, video, toast }) {
     if (document.activeElement !== $("st-x")) $("st-x").value = Math.round(st.x * 100);
     if (document.activeElement !== $("st-y")) $("st-y").value = Math.round(st.y * 100);
 
+    renderAnimation(st);
     renderChips(line);
     placeBox();
   }
@@ -338,7 +389,6 @@ export function createInspector({ store, timeline, video, toast }) {
   $("st-highlight").addEventListener("input", () => set("highlight", $("st-highlight").value));
   $("st-word").addEventListener("change", () => set("wordStyle", $("st-word").value));
   $("st-pop").addEventListener("change", () => set("wordPop", $("st-pop").checked));
-  $("st-entrance").addEventListener("change", () => set("entrance", $("st-entrance").value));
   $("st-outline").addEventListener("input", () => set("outline", Number($("st-outline").value) / 100));
   $("st-outline-color").addEventListener("input", () => set("outlineColor", $("st-outline-color").value));
   $("st-shadow").addEventListener("input", () => set("shadow", Number($("st-shadow").value) / 100));
@@ -368,12 +418,264 @@ export function createInspector({ store, timeline, video, toast }) {
   }
   $("reset-one").addEventListener("click", () => {
     store.update((d) => {
-      const line = selectedLine(d);
-      if (!line) return;
-      const group = d.captions.words[line.from].group;
-      if (group != null) delete d.captions.overrides?.[group];
-      for (let i = line.from; i < line.to; i++) delete d.captions.words[i].color;
+      for (const line of selectedLines(d)) {
+        const group = d.captions.words[line.from].group;
+        if (group != null) delete d.captions.overrides?.[group];
+        for (let i = line.from; i < line.to; i++) delete d.captions.words[i].color;
+      }
     });
+  });
+
+  /* ---------- animation: drawn from the chosen plugin's own list of settings ---------- */
+
+  const DIRECTIONS = [["none", "×", "No movement"], ["up", "↑", "Up"], ["down", "↓", "Down"], ["left", "←", "Left"], ["right", "→", "Right"]];
+  /** The plugin the controls were built for; they're rebuilt only when it changes. */
+  let animBuiltFor = null;
+  let pluginsVersion = 0;
+  let pluginsShown = -1;
+  const fieldEls = new Map();
+  let previewTimer = null;
+  onPluginsChanged(() => { pluginsVersion++; animBuiltFor = null; if (store.doc) render(); });
+
+  /** Changes one setting of the shown captions' animation, leaving the rest as they are. */
+  function setParam(key, value, coalesce) {
+    set("motion", (m) => {
+      const plugin = getPlugin(m?.plugin);
+      if (!plugin) return m;
+      return { plugin: plugin.id, preset: null, params: { ...pluginParams(plugin, m.params), [key]: value } };
+    }, coalesce ?? `motion-${key}`);
+  }
+
+  function renderPluginChoice(m) {
+    const select = $("anim-plugin");
+    if (pluginsShown !== pluginsVersion || (m?.plugin && ![...select.options].some((o) => o.value === m.plugin))) {
+      pluginsShown = pluginsVersion;
+      select.replaceChildren(new Option("None", ""));
+      for (const p of listPlugins()) select.append(new Option(p.builtIn ? p.name : `${p.name} · plugin`, p.id));
+      if (m?.plugin && !getPlugin(m.plugin)) select.append(new Option(`${m.plugin} (not installed)`, m.plugin));
+    }
+    select.value = m?.plugin ?? "";
+  }
+
+  /** Plays a preset on its tile, sampled from the plugin itself, so any plugin's presets preview. */
+  function playSample(el, plugin, params) {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const fps = 30;
+    const d = plugin.durations(params) ?? {};
+    const nIn = Math.max(0, Math.round(d.in || 0));
+    const nOut = Math.max(0, Math.round(d.out || 0));
+    const hold = 20;
+    const base = { size: 16, box: { w: 34, h: 16 }, frame: { w: 160, h: 90 }, fps, seed: 1, holdDuration: hold / fps, lineDuration: (nIn + hold + nOut) / fps };
+    const frames = [];
+    for (let i = 0; i <= nIn; i++) frames.push(plugin.frame(params, { ...base, phase: nIn ? "in" : "hold", progress: nIn ? i / nIn : 0, holdTime: 0 }));
+    for (let i = 1; i < hold; i++) frames.push(plugin.frame(params, { ...base, phase: "hold", progress: 0, holdTime: i / fps }));
+    for (let i = 1; i <= nOut; i++) frames.push(plugin.frame(params, { ...base, phase: "out", progress: i / nOut, holdTime: hold / fps }));
+    const keyframes = frames.map((tf = {}) => ({
+      transform: `translate(${tf.x ?? 0}px, ${tf.y ?? 0}px) rotate(${tf.rotate ?? 0}deg) rotateX(${tf.rotateX ?? 0}deg) scale(${tf.scale ?? 1})`,
+      opacity: Math.max(0, Math.min(1, tf.opacity ?? 1)),
+      filter: `blur(${Math.max(0, (tf.blur ?? 0) * 0.4)}px)`,
+      letterSpacing: `${(tf.tracking ?? 0) * 0.5}em`,
+    }));
+    for (const a of el.getAnimations()) a.cancel();
+    if (keyframes.length > 1) el.animate(keyframes, { duration: (keyframes.length / fps) * 1000, easing: "linear" });
+  }
+
+  function buildField(plugin, field) {
+    const row = document.createElement("div");
+    row.className = `fx-row fx-type-${field.type}`;
+    const id = `fx-${plugin.id}-${field.key}`;
+    const label = document.createElement(field.type === "direction" ? "span" : "label");
+    label.className = "fx-label";
+    label.textContent = field.label;
+    if (field.type !== "direction") label.htmlFor = id;
+    let update;
+    if (field.type === "direction") {
+      const group = document.createElement("div");
+      group.className = "fx-dirs";
+      group.setAttribute("role", "radiogroup");
+      group.setAttribute("aria-label", field.label);
+      const buttons = DIRECTIONS.map(([value, glyph, name]) => {
+        const b = document.createElement("button");
+        b.className = "fx-dir";
+        b.dataset.value = value;
+        b.textContent = glyph;
+        b.title = name;
+        b.setAttribute("aria-label", name);
+        b.addEventListener("click", () => setParam(field.key, value));
+        return b;
+      });
+      group.append(...buttons);
+      row.append(label, group);
+      update = (v) => { for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.value === v)); };
+    } else if (field.type === "select") {
+      const select = document.createElement("select");
+      select.id = id;
+      for (const o of field.options) select.append(new Option(o.label, o.value));
+      select.addEventListener("change", () => setParam(field.key, select.value));
+      row.append(label, select);
+      update = (v) => { select.value = v; };
+    } else if (field.type === "toggle") {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.id = id;
+      box.addEventListener("change", () => setParam(field.key, box.checked));
+      const sw = document.createElement("span");
+      sw.className = "fx-toggle";
+      sw.append(box);
+      row.append(label, sw);
+      update = (v) => { box.checked = !!v; };
+    } else {
+      const range = document.createElement("input");
+      range.type = "range";
+      range.id = id;
+      Object.assign(range, { min: field.min, max: field.max, step: field.step });
+      const num = document.createElement("input");
+      num.type = "text";
+      num.inputMode = "decimal";
+      num.className = "input fx-num";
+      num.setAttribute("aria-label", field.label);
+      const fmt = (v) => Number(v).toFixed(field.decimals ?? 2);
+      const clamp = (v) => Math.min(field.max, Math.max(field.min, v));
+      range.addEventListener("input", () => setParam(field.key, Number(range.value)));
+      range.addEventListener("dblclick", () => setParam(field.key, plugin.defaults[field.key]));
+      num.addEventListener("change", () => {
+        const v = Number(num.value);
+        if (Number.isFinite(v)) setParam(field.key, clamp(v));
+        else render();
+      });
+      // Drag sideways on the number to scrub it, as in Resolve's inspector; a click types instead.
+      num.addEventListener("pointerdown", (ev) => {
+        if (ev.button !== 0 || document.activeElement === num) return;
+        ev.preventDefault();
+        const x0 = ev.clientX;
+        const v0 = Number(range.value);
+        const key = `scrub-${field.key}-${performance.now()}`;
+        let moved = false;
+        try { num.setPointerCapture(ev.pointerId); } catch { /* synthetic pointer */ }
+        const move = (e) => {
+          const dx = e.clientX - x0;
+          if (!moved && Math.abs(dx) < 3) return;
+          moved = true;
+          const steps = Math.round(dx / 3) * (e.shiftKey ? 10 : 1);
+          setParam(field.key, clamp(v0 + steps * Number(field.step)), key);
+        };
+        const up = () => {
+          num.removeEventListener("pointermove", move);
+          if (!moved) { num.focus(); num.select(); }
+        };
+        num.addEventListener("pointermove", move);
+        num.addEventListener("pointerup", up, { once: true });
+        num.addEventListener("pointercancel", up, { once: true });
+      });
+      // Up and Down step the number too (ten steps with Shift).
+      num.addEventListener("keydown", (ev) => {
+        if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+        ev.preventDefault();
+        const step = Number(field.step) * (ev.shiftKey ? 10 : 1);
+        setParam(field.key, clamp(Number(range.value) + (ev.key === "ArrowUp" ? step : -step)));
+      });
+      row.append(label, range, num);
+      update = (v) => {
+        range.value = v;
+        if (document.activeElement !== num) num.value = fmt(v);
+      };
+    }
+    // The diamond resets a setting to the plugin's default, and lights up while it differs.
+    const reset = document.createElement("button");
+    reset.className = "fx-reset";
+    reset.title = "Reset to default";
+    reset.setAttribute("aria-label", `Reset ${field.label} to default`);
+    reset.addEventListener("click", () => setParam(field.key, plugin.defaults[field.key]));
+    row.append(reset);
+    fieldEls.set(field.key, { field, row, update, reset });
+    return row;
+  }
+
+  function buildAnimation(plugin) {
+    const sections = $("anim-sections");
+    const presets = $("anim-presets");
+    sections.replaceChildren();
+    presets.replaceChildren();
+    fieldEls.clear();
+    if (!plugin) return;
+    for (const p of plugin.presets) {
+      const b = document.createElement("button");
+      b.className = "fx-preset";
+      b.dataset.id = p.id;
+      b.setAttribute("role", "radio");
+      b.title = `${p.name}. Click to use, or drag onto captions on the timeline.`;
+      const sample = document.createElement("span");
+      sample.className = "fx-sample";
+      sample.setAttribute("aria-hidden", "true");
+      sample.textContent = "Aa";
+      const name = document.createElement("span");
+      name.className = "fx-name";
+      name.textContent = p.name;
+      b.append(sample, name);
+      b.addEventListener("pointerenter", () => playSample(sample, plugin, pluginParams(plugin, p.params)));
+      b.addEventListener("focus", () => playSample(sample, plugin, pluginParams(plugin, p.params)));
+      makeDraggable(b, {
+        timeline,
+        label: `${p.name} animation`,
+        onClick: () => set("motion", animation(p.id, plugin.id)),
+        onDrop: (ids) => applyTo(ids, { motion: animation(p.id, plugin.id) }, `“${p.name}”`),
+      });
+      presets.append(b);
+    }
+    for (const section of plugin.sections) {
+      const details = document.createElement("details");
+      details.className = "fx-section";
+      details.open = !!section.open;
+      const summary = document.createElement("summary");
+      summary.textContent = section.title;
+      const body = document.createElement("div");
+      body.className = "fx-body";
+      for (const field of section.fields) body.append(buildField(plugin, field));
+      details.append(summary, body);
+      sections.append(details);
+    }
+  }
+
+  function renderAnimation(st) {
+    const m = st.motion ?? null;
+    const plugin = m?.plugin ? getPlugin(m.plugin) : null;
+    renderPluginChoice(m);
+    const key = plugin ? plugin.id : m?.plugin ? `missing:${m.plugin}` : "none";
+    if (animBuiltFor !== key) { buildAnimation(plugin); animBuiltFor = key; }
+    $("anim-missing").hidden = !(m?.plugin && !plugin);
+    $("anim-preview").disabled = !plugin || !store.doc.captions.words.length;
+    $("anim-desc").textContent = plugin?.description ?? (m?.plugin ? "" : "Captions appear and disappear on the cut.");
+    if (!plugin) { $("anim-state").textContent = m?.plugin ? "Missing" : "None"; return; }
+    const params = pluginParams(plugin, m.params);
+    for (const { field, row, update, reset } of fieldEls.values()) {
+      update(params[field.key]);
+      row.hidden = field.show ? !field.show(params) : false;
+      reset.classList.toggle("changed", JSON.stringify(params[field.key]) !== JSON.stringify(plugin.defaults[field.key]));
+    }
+    for (const b of $("anim-presets").querySelectorAll(".fx-preset")) b.setAttribute("aria-checked", String(b.dataset.id === m.preset));
+    $("anim-state").textContent = m.preset ? (plugin.presets.find((p) => p.id === m.preset)?.name ?? "") : "Custom";
+  }
+
+  $("anim-plugin").addEventListener("change", () => {
+    const id = $("anim-plugin").value;
+    set("motion", id ? animation(null, id) : null);
+  });
+
+  $("anim-plugins-folder").addEventListener("click", () => api.post("/plugins/open").catch((e) => toast(e.message)));
+
+  // Plays the caption the animation is shown for, from just before it starts to just after it ends.
+  $("anim-preview").addEventListener("click", () => {
+    const cap = store.doc?.captions;
+    if (!cap?.words.length) return;
+    const lines = groupLines(cap.words, cap.perLine);
+    const line = selectedLines()[0] ?? referenceLine();
+    const k = line ? lines.findIndex((l) => l.from === line.from) : -1;
+    if (k < 0) return;
+    const { start, end } = lineTimes(cap.words, lines, k);
+    clearTimeout(previewTimer);
+    video.currentTime = Math.max(0, start - 0.25);
+    video.play();
+    previewTimer = setTimeout(() => video.pause(), (Math.min(6, end - start) + 0.5) * 1000);
   });
 
   /* ---------- saving the current style as a preset ---------- */
@@ -407,7 +709,7 @@ export function createInspector({ store, timeline, video, toast }) {
   function referenceLine() {
     const cap = store.doc.captions;
     const lines = groupLines(cap.words, cap.perLine);
-    if (scope === "one") return selectedLine();
+    if (scope === "one") return selectedLines()[0] ?? null;
     const t = video.currentTime;
     const k = lines.findIndex((_, i) => { const r = lineTimes(cap.words, lines, i); return t >= r.start && t < r.end; });
     if (k >= 0) return lines[k];
@@ -494,11 +796,11 @@ export function createInspector({ store, timeline, video, toast }) {
         const cap = d.captions;
         const write = (k2, v) => {
           if (scope === "one") {
-            const line = selectedLine(d);
-            if (!line) return;
-            const group = lockLine(cap, line);
-            cap.overrides ??= {};
-            cap.overrides[group] = { ...(cap.overrides[group] ?? {}), [k2]: v };
+            for (const line of selectedLines(d)) {
+              const group = lockLine(cap, line);
+              cap.overrides ??= {};
+              cap.overrides[group] = { ...(cap.overrides[group] ?? {}), [k2]: v };
+            }
           } else cap.style[k2] = v;
         };
         write("x", Math.min(0.95, Math.max(0.05, x)));

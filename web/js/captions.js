@@ -1,5 +1,33 @@
 // Captions are a list of timed words. These helpers group them into lines, apply edits, and write
 // the ASS subtitle file (rendered live by libass in the page and burned in by ffmpeg) and SRT.
+//
+// Words sit on caption tracks (C1, C2, ...), which stack like video tracks in an editor. The words
+// array is kept in track order and then time order, so every line is a run of neighbouring words.
+
+import { phaseLengths, resolveMotion, shiftTransitions, writeLine } from "./motion.js";
+import { GLOBAL_ONLY, defaultTracks } from "./styles.js";
+
+/** The track a word is on. Words from before tracks existed are on the first. */
+export const trackOf = (w) => w.track ?? 1;
+
+/** Makes sure there are tracks, and that every word is on one of them. */
+export function ensureTracks(captions) {
+  if (!captions.tracks?.length) captions.tracks = defaultTracks();
+  const ids = new Set(captions.tracks.map((t) => t.id));
+  for (const w of captions.words) if (!ids.has(trackOf(w))) w.track = captions.tracks[0].id;
+  sortWords(captions);
+}
+
+/** Puts words back in track order, then time order. Call after anything moves words between tracks. */
+export function sortWords(captions) {
+  const rank = new Map((captions.tracks ?? []).map((t, i) => [t.id, i]));
+  captions.words.sort((a, b) => (rank.get(trackOf(a)) ?? 0) - (rank.get(trackOf(b)) ?? 0) || a.start - b.start);
+}
+
+/** A new track id, one past the highest. */
+export function nextTrackId(captions) {
+  return Math.max(0, ...(captions.tracks ?? []).map((t) => t.id)) + 1;
+}
 
 
 /** Groups words into caption lines: [{ from, to }] index ranges into `words`. */
@@ -12,8 +40,8 @@ export function groupLines(words, perLine) {
       // Lines the user has edited keep exactly the words they typed.
       while (j < words.length && words[j].group === words[i].group) j++;
     } else {
-      // Otherwise break on the word limit, sentence ends, pauses, and lines running long.
-      while (j < words.length && words[j].group == null && j - i < perLine) {
+      // Otherwise break on the word limit, sentence ends, pauses, lines running long, and tracks.
+      while (j < words.length && words[j].group == null && j - i < perLine && trackOf(words[j]) === trackOf(words[i])) {
         const prev = words[j - 1];
         if (/[.!?]$/.test(prev.text) || words[j].start - prev.end > 0.6 || words[j].end - words[i].start > 2.6) break;
         j++;
@@ -31,7 +59,7 @@ export function lineTimes(words, lines, k) {
   const start = words[from].start;
   let end = words[to - 1].end;
   const next = lines[k + 1];
-  if (next && words[next.from].start - end < 0.3) end = words[next.from].start;
+  if (next && trackOf(words[next.from]) === trackOf(words[from]) && words[next.from].start - end < 0.3) end = words[next.from].start;
   return { start, end };
 }
 
@@ -170,12 +198,12 @@ export function ensureIds(captions) {
 }
 
 /** Words spread over [start, end] in proportion to their length. */
-function spread(captions, tokens, start, end, group) {
+function spread(captions, tokens, start, end, group, track = 1) {
   const total = tokens.reduce((n, t) => n + t.length, 0) || 1;
   let t = start;
   return tokens.map((text) => {
     const d = ((end - start) * text.length) / total;
-    const w = { id: nextId(captions), text, start: t, end: t + d, group };
+    const w = { id: nextId(captions), text, start: t, end: t + d, group, track };
     t += d;
     return w;
   });
@@ -202,7 +230,7 @@ export function editLine(captions, { from, to }, text) {
   const group = old[0].group ?? nextGroup(captions);
   const replacement = tokens.length === old.length
     ? old.map((w, i) => ({ ...w, text: tokens[i], group }))
-    : spread(captions, tokens, old[0].start, old[old.length - 1].end, group);
+    : spread(captions, tokens, old[0].start, old[old.length - 1].end, group, trackOf(old[0]));
   words.splice(from, to - from, ...replacement);
 }
 
@@ -266,13 +294,65 @@ export function deleteLines(captions, lines) {
   for (const line of [...lines].sort((a, b) => b.from - a.from)) captions.words.splice(line.from, line.to - line.from);
 }
 
-/** Adds a new caption line; returns the id of its first word. */
-export function insertLine(captions, start, end, text) {
+/** Adds a new caption line on a track; returns the id of its first word. */
+export function insertLine(captions, start, end, text, track = captions.tracks?.[0]?.id ?? 1) {
   const tokens = text.trim().split(/\s+/).filter(Boolean);
-  const added = spread(captions, tokens, start, end, nextGroup(captions));
-  const at = captions.words.findIndex((w) => w.start >= start);
-  captions.words.splice(at < 0 ? captions.words.length : at, 0, ...added);
+  const added = spread(captions, tokens, start, end, nextGroup(captions), track);
+  captions.words.push(...added);
+  sortWords(captions);
   return added[0].id;
+}
+
+/**
+ * Copies lines (as `clip` from copyLines) onto a track starting at `at`; returns the first word id
+ * of each new line. Each copy gets its own group, carrying the original's style.
+ */
+export function pasteLines(captions, clip, at, trackFor) {
+  const ids = [];
+  for (const item of clip.lines) {
+    const group = nextGroup(captions);
+    if (item.override) {
+      captions.overrides ??= {};
+      captions.overrides[group] = structuredClone(item.override);
+    }
+    const added = item.words.map((w) => ({ id: nextId(captions), text: w.text, start: at + w.start, end: at + w.end, group, track: trackFor(item), ...(w.color ? { color: w.color } : {}) }));
+    captions.words.push(...added);
+    ids.push(added[0].id);
+  }
+  sortWords(captions);
+  return ids;
+}
+
+/** A copy of lines, timed from the earliest one's start, for pasting elsewhere. */
+export function copyLines(captions, lines) {
+  const { words } = captions;
+  const t0 = Math.min(...lines.map((l) => words[l.from].start));
+  const minRank = Math.min(...lines.map((l) => (captions.tracks ?? []).findIndex((t) => t.id === trackOf(words[l.from]))));
+  return {
+    lines: lines.map((l) => {
+      const group = words[l.from].group;
+      return {
+        track: trackOf(words[l.from]),
+        trackOffset: (captions.tracks ?? []).findIndex((t) => t.id === trackOf(words[l.from])) - minRank,
+        override: group != null && captions.overrides?.[group] ? structuredClone(captions.overrides[group]) : null,
+        words: words.slice(l.from, l.to).map((w) => ({ text: w.text, start: w.start - t0, end: w.end - t0, color: w.color })),
+      };
+    }),
+    duration: Math.max(...lines.map((l) => words[l.to - 1].end)) - t0,
+  };
+}
+
+/** Moves lines up or down the track stack by `shift` places. The caller checks there's room. */
+export function shiftTracks(captions, lines, shift) {
+  if (!shift) return;
+  const tracks = captions.tracks;
+  for (const line of lines) {
+    lockLine(captions, line);
+    const rank = tracks.findIndex((t) => t.id === trackOf(captions.words[line.from]));
+    const target = tracks[Math.min(tracks.length - 1, Math.max(0, rank + shift))].id;
+    for (let i = line.from; i < line.to; i++) captions.words[i].track = target;
+  }
+  sortWords(captions);
 }
 
 /** Moves the boundary between word i and the next one, keeping both words a sensible length. */
@@ -283,14 +363,6 @@ export function setWordBoundary(captions, i, t) {
   const clamped = Math.min(Math.max(t, a.start + MIN_WORD), b.end - MIN_WORD);
   a.end = clamped;
   b.start = clamped;
-}
-
-function assTime(s) {
-  const cs = Math.max(0, Math.round(s * 100));
-  const h = Math.floor(cs / 360000);
-  const m = Math.floor(cs / 6000) % 60;
-  const sec = Math.floor(cs / 100) % 60;
-  return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}.${String(cs % 100).padStart(2, "0")}`;
 }
 
 function assEscape(text) {
@@ -358,23 +430,42 @@ function gradientBands(text, st, size, y, W, stops) {
 export function lineStyle(captions, words, line) {
   const group = words[line.from].group;
   const override = group != null ? captions.overrides?.[group] : null;
-  return override ? { ...captions.style, ...override } : captions.style;
+  if (!override) return captions.style;
+  const st = { ...captions.style, ...override };
+  for (const key of GLOBAL_ONLY) st[key] = captions.style[key];
+  return st;
+}
+
+/** Ids of the tracks whose captions are hidden from the picture and the export. */
+function hiddenTracks(captions) {
+  return new Set((captions.tracks ?? []).filter((t) => t.hidden).map((t) => t.id));
+}
+
+/** Each track's place in the stack, bottom first. */
+function trackRanks(captions) {
+  return new Map((captions.tracks ?? []).map((t, i) => [t.id, i]));
 }
 
 /**
  * The subtitle file used both for the live overlay (libass in the page) and for burning into
  * the export (libass in ffmpeg). Each caption is one event per spoken word, showing the whole
  * line with that word styled; karaoke is one event per line using libass's own fill timing.
+ * Animations are baked frame by frame (see motion.js), so `fps` should be the video's.
  */
-export function buildAss(captions, width, height) {
-  if (!captions.style.invert) return buildTrack(captions, width, height);
+export function buildAss(captions, width, height, opts = {}) {
+  if (!captions.style.invert) return buildTrack(captions, width, height, opts);
   // Inverted captions keep their outline, shadow and box as ordinary drawing under the
   // letters, with the letters themselves left empty for the inverted video (see buildMask).
-  const { outline, shadow, box } = captions.style;
-  if (!(outline > 0 || shadow > 0 || box)) return null;
-  return buildTrack({ ...captions, style: { ...captions.style, gradient: "none" } }, width, height)
+  const looks = [captions.style, ...Object.values(captions.overrides ?? {}).map((o) => ({ ...captions.style, ...o }))];
+  if (!looks.some((s) => s.outline > 0 || s.shadow > 0 || s.box)) return null;
+  const flat = (o) => ({ ...o, gradient: "none" });
+  return buildTrack({
+    ...captions,
+    style: flat(captions.style),
+    overrides: Object.fromEntries(Object.entries(captions.overrides ?? {}).map(([g, o]) => [g, flat(o)])),
+  }, width, height, { ...opts, hideLetters: true })
     .replace(/^(Style: Default,[^,]*,[^,]*,)&H..(\w{6}&),&H..(\w{6}&)/m, "$1&HFF$2,&HFF$3")
-    // Animations fade with \alpha, which would bring the letters back; fade the rest only.
+    // Words that hide or dim set \alpha, which would bring the letters back; apply it to the rest only.
     .replace(/\\alpha(&H[0-9A-F]{2}&)/gi, "\\3a$1\\4a$1");
 }
 
@@ -382,18 +473,18 @@ export function buildAss(captions, width, height) {
  * For inverted captions, the letters alone in plain white: the mask through which the video
  * shows with its brightness flipped. Null when the captions aren't inverted.
  */
-export function buildMask(captions, width, height) {
+export function buildMask(captions, width, height, opts = {}) {
   if (!captions.style.invert) return null;
-  const plain = { fill: "#ffffff", highlight: "#ffffff" };
+  const plain = { fill: "#ffffff", highlight: "#ffffff", outline: 0, shadow: 0, box: false, gradient: "none" };
   return buildTrack({
     ...captions,
-    style: { ...captions.style, ...plain, outline: 0, shadow: 0, box: false, gradient: "none" },
+    style: { ...captions.style, ...plain },
     overrides: Object.fromEntries(Object.entries(captions.overrides ?? {}).map(([g, o]) => [g, { ...o, ...plain }])),
     words: captions.words.map(({ color, ...w }) => w),
-  }, width, height);
+  }, width, height, opts);
 }
 
-function buildTrack(captions, width, height) {
+function buildTrack(captions, width, height, { fps = 30, hideLetters = false } = {}) {
   const { words, perLine } = captions;
   const base = captions.style;
   const W = width || 1920;
@@ -403,21 +494,23 @@ function buildTrack(captions, width, height) {
   const size = fs(base);
   const marginH = Math.round(((1 - base.width) / 2) * W);
   const outlinePx = (st) => Math.round(st.outline * fs(st) * 10) / 10;
-  const karaoke = base.wordStyle === "karaoke";
+  const spacingPx = (st) => Math.round(st.spacing * fs(st) * 10) / 10;
+  const shadowPx = (st) => Math.round(st.shadow * fs(st) * 10) / 10;
+  const rate = fps > 0 ? fps : 30;
 
   const style = [
     "Default",
     base.font,
     size,
-    karaoke ? assColor(base.highlight) : assColor(base.fill),
+    assColor(base.fill),
     assColor(base.fill),
     assColor(base.outlineColor),
     assColor(base.shadowColor, base.shadowOpacity),
     0, 0, 0, 0, 100, 100,
-    Math.round(base.spacing * size * 10) / 10,
+    spacingPx(base),
     0, 1,
     outlinePx(base),
-    Math.round(base.shadow * size * 10) / 10,
+    shadowPx(base),
     2, marginH, marginH, 0, 1,
   ].join(",");
   // The background box is its own layer of invisible text in one run, so libass draws one box
@@ -425,7 +518,7 @@ function buildTrack(captions, width, height) {
   const boxStyle = [
     "Box", base.font, size, assColor("#ffffff", 0), assColor("#ffffff", 0),
     assColor(base.boxColor, base.boxOpacity), assColor(base.boxColor, base.boxOpacity),
-    0, 0, 0, 0, 100, 100, Math.round(base.spacing * size * 10) / 10, 0, 3,
+    0, 0, 0, 0, 100, 100, spacingPx(base), 0, 3,
     Math.round(size * 0.22), 0, 2, marginH, marginH, 0, 1,
   ].join(",");
 
@@ -440,14 +533,17 @@ function buildTrack(captions, width, height) {
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
     `Style: ${style}`,
-    ...(base.box ? [`Style: ${boxStyle}`] : []),
+    `Style: ${boxStyle}`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
   ];
 
+  const hidden = hiddenTracks(captions);
+  const ranks = trackRanks(captions);
   const lines = groupLines(words, perLine);
   lines.forEach((line, k) => {
+    if (hidden.has(trackOf(words[line.from]))) return;
     const { start, end } = lineTimes(words, lines, k);
     const st = lineStyle(captions, words, line);
     const lineWords = words.slice(line.from, line.to);
@@ -455,48 +551,60 @@ function buildTrack(captions, width, height) {
     const y = Math.round(st.y * H);
     const size = fs(st);
     const ob = outlinePx(st);
-    const display = (w) => assEscape(base.uppercase ? w.text.toLocaleUpperCase() : w.text);
-    // Per-line overrides of size and colour come first so the whole line picks them up.
-    const lineTags = (st.size !== base.size ? `\\fs${size}` : "");
-    const box = (from, to, head) => {
-      if (!base.box) return;
-      // Entrances fade with \alpha, which would also show the hidden text and make the box
-      // opaque, so the box fades only its own colours, up to its set opacity.
-      const shown = assColor(base.boxColor, base.boxOpacity).slice(0, 4) + "&";
-      const fades = head.replace(/\\alpha&H00&/g, `\\3a${shown}\\4a${shown}`).replace(/\\alpha&HFF&/g, "\\3a&HFF&\\4a&HFF&");
-      out.push(`Dialogue: 0,${assTime(from)},${assTime(to)},Box,,0,0,0,,${fades}${lineWords.map(display).join(" ")}`);
-    };
-    const layer = base.box ? 1 : 0;
+    const display = (w) => assEscape(st.uppercase ? w.text.toLocaleUpperCase() : w.text);
+    // Higher tracks draw over lower ones, each with room for its box, text and gradient bands.
+    const layerBase = (ranks.get(trackOf(words[line.from])) ?? 0) * 20;
 
-    const entrance = (first, last) => {
-      let tags = "";
-      if (first && st.entrance === "slide") {
-        const d = Math.round(size * 0.6);
-        tags += `\\move(${x},${y + d},${x},${y},0,160)\\alpha&HFF&\\t(0,160,\\alpha&H00&)`;
-      } else {
-        tags += `\\pos(${x},${y})`;
-      }
-      if (first && st.entrance === "pop") tags += "\\fscx80\\fscy80\\t(0,110,\\fscx100\\fscy100)";
-      if (first && st.entrance === "pop-up") {
-        // Springs up from below: overshoots, then settles at full size.
-        tags = tags.replace(/\\pos\([^)]*\)/, `\\move(${x},${y + Math.round(size * 0.35)},${x},${y},0,150)`);
-        tags += "\\fscx40\\fscy40\\alpha&HFF&\\t(0,90,\\alpha&H00&)\\t(0,150,\\fscx110\\fscy110)\\t(150,240,\\fscx100\\fscy100)";
-      }
-      if (first && st.entrance === "bounce") tags += "\\fscx55\\fscy55\\t(0,120,\\fscx112\\fscy112)\\t(120,200,\\fscx100\\fscy100)";
-      if (st.entrance === "fade") tags += `\\fad(${first ? 140 : 0},${last ? 120 : 0})`;
-      return tags;
+    // Where this caption's look differs from the overall style, the line says so itself.
+    let lineTags = "";
+    if (st.font !== base.font) lineTags += `\\fn${st.font}`;
+    if (size !== fs(base)) lineTags += `\\fs${size}`;
+    if (spacingPx(st) !== spacingPx(base)) lineTags += `\\fsp${spacingPx(st)}`;
+    if (ob !== outlinePx(base)) lineTags += `\\bord${ob}`;
+    if (st.outlineColor !== base.outlineColor) lineTags += `\\3c${tagColor(st.outlineColor)}`;
+    if (shadowPx(st) !== shadowPx(base)) lineTags += `\\shad${shadowPx(st)}`;
+    if (st.shadowColor !== base.shadowColor) lineTags += `\\4c${tagColor(st.shadowColor)}`;
+    if (st.shadowOpacity !== base.shadowOpacity) lineTags += `\\4a&H${assColor("#000000", st.shadowOpacity).slice(2, 4)}&`;
+
+    const events = [];
+    const textAlpha = { c1: hideLetters ? 0 : 1, c3: 1, c4: st.shadowOpacity };
+    const layer = layerBase + (st.box ? 1 : 0);
+    const box = (from, to) => {
+      if (!st.box) return;
+      const fill = assColor(st.boxColor, st.boxOpacity);
+      const head = `\\fn${st.font}\\fs${size}\\fsp${spacingPx(st)}\\bord${Math.round(size * 0.22)}`
+        + `\\3c${tagColor(st.boxColor)}\\4c${tagColor(st.boxColor)}\\3a&H${fill.slice(2, 4)}&\\4a&H${fill.slice(2, 4)}&`;
+      const text = lineWords.map(display).join(" ");
+      events.push({ layer: layerBase, from, to, style: "Box", head, body: () => text, alpha: { c1: 0, c3: st.boxOpacity, c4: st.boxOpacity }, kind: "box" });
     };
 
-    if (karaoke) {
+    const motion = resolveMotion(st.motion);
+    const chars = [...lineWords.map(display).join(" ")].length;
+    const textW = chars * size * (0.56 + st.spacing);
+    const rows = Math.min(3, Math.max(1, Math.ceil(textW / (base.width * W))));
+    const extent = { w: Math.min(textW, base.width * W), h: rows * size };
+    const frame = { w: W, h: H };
+    // An entrance that scales the line already makes the first word pop.
+    const { tin } = phaseLengths(motion, end - start, rate);
+    const entranceScales = !!motion && tin > 0 && Math.abs((motion.plugin.frame(motion.params, {
+      phase: "in", progress: 0, holdTime: 0, holdDuration: 0, size, box: extent, frame, fps: rate, seed: k, lineDuration: end - start,
+    })?.scale ?? 1) - 1) > 0.05;
+    const finish = () => writeLine(out, {
+      events, start, end, anchor: { x, y }, size, box: extent, frame, fps: rate, motion, seed: k, spacing: spacingPx(st),
+    });
+
+    if (st.wordStyle === "karaoke") {
       // One event; libass sweeps each word from the fill colour to the highlight as it's spoken.
-      const parts = lineWords.map((w, i) => {
-        const next = i < lineWords.length - 1 ? lineWords[i + 1].start : end;
-        const cs = Math.max(1, Math.round((next - w.start) * 100));
+      // A piece cut from partway through starts its sweep timings that much earlier.
+      const spans = lineWords.map((w, i) => [w.start - start, (i < lineWords.length - 1 ? lineWords[i + 1].start : end) - start]);
+      const body = (ms) => lineWords.map((w, i) => {
+        const [a, b] = spans[i].map((s) => Math.max(0, s * 1000 - ms));
+        const cs = ms ? Math.round((b - a) / 10) : Math.max(1, Math.round((spans[i][1] - spans[i][0]) * 100));
         return `{\\kf${cs}}${display(w)}`;
-      });
-      const head = `{\\an2${entrance(true, true)}${lineTags}}`;
-      box(start, end, head);
-      out.push(`Dialogue: ${layer},${assTime(start)},${assTime(end)},Default,,0,0,0,,${head}${parts.join(" ")}`);
+      }).join(" ");
+      box(start, end);
+      events.push({ layer, from: start, to: end, style: "Default", head: `${lineTags}\\1c${tagColor(st.highlight)}\\2c${tagColor(st.fill)}`, body, alpha: textAlpha, kind: "text" });
+      finish();
       return;
     }
 
@@ -516,11 +624,8 @@ function buildTrack(captions, width, height) {
       const from = i === 0 ? start : word.start;
       const to = i === lineWords.length - 1 ? end : lineWords[i + 1].start;
       if (to <= from) return;
-      const first = i === 0;
-      const last = i === lineWords.length - 1;
-      // An entrance that scales the line already makes the first word pop.
-      const scaleEntrance = first && (st.entrance === "pop" || st.entrance === "bounce" || st.entrance === "pop-up");
-      box(from, to, `{\\an2${entrance(first, last)}${lineTags}}`);
+      const scaleEntrance = i === 0 && entranceScales;
+      box(from, to);
       bands.forEach((band, b) => {
         const colorOf = (w) => band?.color ?? w.color ?? st.fill;
         const segments = lineWords.map((w, j) => {
@@ -537,10 +642,10 @@ function buildTrack(captions, width, height) {
           } else if (st.wordStyle === "box") {
             // A thick outline in the highlight colour reads as a rounded box behind the word.
             tags += `\\c${tagColor(painted ? colorOf(w) : readableOn(st.highlight))}\\3c${tagColor(st.highlight)}\\bord${Math.round(size * 0.2)}`;
-            reset += `\\3c${tagColor(base.outlineColor)}\\bord${ob}`;
+            reset += `\\3c${tagColor(st.outlineColor)}\\bord${ob}`;
           } else if (st.wordStyle === "glow") {
             tags += `\\c${tagColor(colorOf(w))}\\3c${tagColor(st.highlight)}\\bord${Math.round(size * 0.1)}\\blur${Math.round(size * 0.12)}`;
-            reset += `\\3c${tagColor(base.outlineColor)}\\bord${ob}\\blur0`;
+            reset += `\\3c${tagColor(st.outlineColor)}\\bord${ob}\\blur0`;
           } else if (st.wordStyle === "blur") {
             // Comes into focus as it fades in, the way Apple's captions do.
             tags += `\\c${tagColor(colorOf(w))}\\alpha&HFF&\\blur${Math.round(size * 0.18)}\\t(0,240,\\alpha&H00&\\blur0)`;
@@ -554,17 +659,23 @@ function buildTrack(captions, width, height) {
           }
           return `{${tags}}${text(w, j)}${reset ? `{${reset}}` : ""}`;
         });
-        const head = `{\\an2${entrance(first, last)}${lineTags}${band ? band.clip : ""}}`;
-        out.push(`Dialogue: ${layer + b},${assTime(from)},${assTime(to)},Default,,0,0,0,,${head}${segments.join(" ")}`);
+        const joined = segments.join(" ");
+        events.push({
+          layer: layer + b, from, to, style: "Default", head: lineTags, clip: band ? band.clip : "",
+          body: (ms) => shiftTransitions(joined, ms), alpha: textAlpha, kind: "text",
+        });
       });
     });
+    finish();
   });
   return out.join("\n") + "\n";
 }
 
 /** Font families the captions use, for loading in the page and handing to the export. */
 export function usedFonts(captions) {
-  return [captions.style.font];
+  const fonts = new Set([captions.style.font]);
+  for (const o of Object.values(captions.overrides ?? {})) if (o.font) fonts.add(o.font);
+  return [...fonts];
 }
 
 function srtTime(s) {
@@ -575,12 +686,16 @@ function srtTime(s) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")},${String(ms % 1000).padStart(3, "0")}`;
 }
 
+/** Every visible caption in time order, across all tracks. */
 export function buildSrt(captions) {
   const { words, perLine } = captions;
+  const hidden = hiddenTracks(captions);
   const lines = groupLines(words, perLine);
   return lines
-    .map((line, k) => {
-      const { start, end } = lineTimes(words, lines, k);
+    .map((line, k) => ({ line, ...lineTimes(words, lines, k) }))
+    .filter(({ line }) => !hidden.has(trackOf(words[line.from])))
+    .sort((a, b) => a.start - b.start)
+    .map(({ line, start, end }, k) => {
       const text = words.slice(line.from, line.to).map((w) => w.text).join(" ");
       return `${k + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${text}\n`;
     })

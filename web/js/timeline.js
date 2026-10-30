@@ -1,13 +1,17 @@
-// The timeline: a ruler with the playhead, a caption track you edit directly, a colour track of
-// graded sections, and the video and audio tracks for reference. Caption blocks are DOM elements; the ruler, thumbnails and waveform
-// are canvases drawn only for the visible stretch, so long videos stay cheap at any zoom.
+// The timeline: a ruler with the playhead, stacked caption tracks you edit directly, a colour
+// track of graded sections, and the video and audio tracks for reference. It behaves like the
+// timeline of an editor: drag captions in time or up and down the tracks, Alt-drag to copy, copy and
+// paste, right-click for more, lock and hide tracks, and drag a selected caption's top corners to
+// set how long it animates in and out. Caption blocks are DOM elements; the ruler, thumbnails and
+// waveform are canvases drawn only for the visible stretch, so long videos stay cheap at any zoom.
 
 import { api } from "./api.js";
 import {
-  MIN_WORD, deleteLines, editLine, groupLines, insertLine, lineTimes, lockLine, mergeLines, moveLines,
-  retimeLine, setWordBoundary, splitLine,
+  MIN_WORD, copyLines, deleteLines, editLine, groupLines, insertLine, lineStyle, lineTimes, lockLine, mergeLines,
+  moveLines, nextTrackId, pasteLines, retimeLine, setWordBoundary, shiftTracks, splitLine, trackOf,
 } from "./captions.js";
 import { freeSpan } from "./grade.js";
+import { phaseLengths, resolveMotion } from "./motion.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_PX_PER_SEC = 800;
@@ -32,6 +36,10 @@ function label(t, step) {
   return step < 1 ? `${m}:${s.toFixed(1).padStart(4, "0")}` : `${m}:${String(Math.round(s)).padStart(2, "0")}`;
 }
 
+function newTrack(captions) {
+  return { id: nextTrackId(captions), name: `Captions ${captions.tracks.length + 1}`, hidden: false, locked: false };
+}
+
 export class Timeline {
   px = 50;
   snapping = true;
@@ -48,6 +56,11 @@ export class Timeline {
   #drag = null;
   /** True while showing the whole video, so resizing the window keeps it fitted. */
   #fitted = true;
+  /** Caption rows by track id, and the track list they were built for. */
+  #rows = new Map();
+  #trackKey = null;
+  /** Copied captions, for pasting at the playhead or onto a track. */
+  #clipboard = null;
 
   constructor({ store, video, toast, onSelectionChange, onSeek, onGradeSelect }) {
     this.store = store;
@@ -67,7 +80,9 @@ export class Timeline {
     this.onSeek = onSeek;
     this.scroll = $("tl-scroll");
     this.content = $("tl-content");
-    this.track = $("tl-captions");
+    this.tracksBox = $("tl-caption-rows");
+    this.heads = $("tl-caption-heads");
+    this.newTrackRow = $("tl-new-track");
     this.playhead = $("tl-playhead");
     this.canvases = { ruler: $("tl-ruler"), video: $("tl-video"), audio: $("tl-audio") };
     this.#bind();
@@ -78,6 +93,7 @@ export class Timeline {
   }
 
   get #captions() { return this.store.doc?.captions; }
+  get #fps() { return this.#media?.fps || 30; }
 
   /* ---------- opening ---------- */
 
@@ -109,7 +125,7 @@ export class Timeline {
     this.#media = null;
     this.selection.clear();
     this.gradeSelection = null;
-    this.track.replaceChildren();
+    for (const row of this.#rows.values()) row.replaceChildren();
     this.grades.replaceChildren();
   }
 
@@ -162,34 +178,220 @@ export class Timeline {
     if (x > left + this.#viewWidth - 24 || x < left) this.scroll.scrollLeft = Math.max(0, x - 24);
   }
 
+  /** Times the playhead stops at on the way past: caption and grade edges. */
+  #editPoints() {
+    const words = this.#captions?.words ?? [];
+    const points = [0, this.#duration];
+    for (const l of this.#lines) points.push(words[l.from].start, words[l.to - 1].end);
+    for (const s of this.store.doc?.grade?.sections ?? []) points.push(s.start, s.end);
+    return points.sort((a, b) => a - b);
+  }
+
+  /** The previous or next edit point from the playhead, for Up and Down. */
+  editPoint(dir) {
+    const t = this.video.currentTime;
+    const points = this.#editPoints();
+    const found = dir > 0 ? points.find((p) => p > t + 1e-3) : points.reverse().find((p) => p < t - 1e-3);
+    return found ?? null;
+  }
+
+  /* ---------- tracks ---------- */
+
+  #tracks() { return this.#captions?.tracks ?? []; }
+  #rankOf(id) { return this.#tracks().findIndex((t) => t.id === id); }
+  #trackById(id) { return this.#tracks().find((t) => t.id === id) ?? null; }
+  #isLocked(id) { return !!this.#trackById(id)?.locked; }
+  #lineTrack(line) { return trackOf(this.#captions.words[line.from]); }
+
+  /** Rebuilds the caption rows and their headers when the track list changes. */
+  #renderTracks() {
+    const tracks = this.#tracks();
+    const key = JSON.stringify(tracks);
+    if (key === this.#trackKey && this.#rows.size) return;
+    this.#trackKey = key;
+    this.#rows.clear();
+    this.heads.replaceChildren();
+    this.tracksBox.replaceChildren();
+    // The top track first, as video tracks stack in an editor: higher tracks draw over lower ones.
+    for (let r = tracks.length - 1; r >= 0; r--) {
+      const t = tracks[r];
+      const head = document.createElement("div");
+      head.className = "tl-head captions";
+      head.dataset.track = t.id;
+      head.classList.toggle("is-hidden", !!t.hidden);
+      head.classList.toggle("is-locked", !!t.locked);
+      const tag = document.createElement("b");
+      tag.textContent = `C${r + 1}`;
+      const name = document.createElement("span");
+      name.className = "tl-track-name";
+      name.textContent = t.name;
+      name.title = "Double-click to rename";
+      name.addEventListener("dblclick", () => this.#renameTrack(t.id, name));
+      const button = (icon, pressed, title, onClick) => {
+        const b = document.createElement("button");
+        b.className = "tl-track-btn";
+        b.setAttribute("aria-pressed", String(pressed));
+        b.title = title;
+        b.setAttribute("aria-label", `${title}: C${r + 1}`);
+        b.innerHTML = `<svg class="icon"><use href="${icon}"/></svg>`;
+        b.addEventListener("click", onClick);
+        return b;
+      };
+      const eye = button(t.hidden ? "#i-eye-off" : "#i-eye", !!t.hidden, t.hidden ? "Show this track" : "Hide this track", () => this.setTrack(t.id, { hidden: !t.hidden }));
+      const lock = button(t.locked ? "#i-lock" : "#i-unlock", !!t.locked, t.locked ? "Unlock this track" : "Lock this track", () => this.setTrack(t.id, { locked: !t.locked }));
+      head.append(tag, name, eye, lock);
+      head.addEventListener("contextmenu", (ev) => this.#trackContext(ev, t.id));
+      this.heads.append(head);
+
+      const row = document.createElement("div");
+      row.className = "tl-row captions";
+      row.dataset.track = t.id;
+      row.classList.toggle("is-hidden", !!t.hidden);
+      row.classList.toggle("is-locked", !!t.locked);
+      row.title = t.locked ? `${t.name} is locked` : "Double-click empty space to add a caption";
+      this.tracksBox.append(row);
+      this.#rows.set(t.id, row);
+    }
+  }
+
+  setTrack(id, patch) {
+    this.store.update((d) => {
+      const t = d.captions.tracks.find((x) => x.id === id);
+      if (t) Object.assign(t, patch);
+    });
+    if (patch.locked) {
+      // Captions on a locked track can't be edited, so they can't stay selected either.
+      const words = this.#captions.words;
+      this.select(this.#lines.filter((l) => this.selection.has(words[l.from].id) && trackOf(words[l.from]) !== id).map((l) => words[l.from].id));
+    }
+  }
+
+  /** Adds an empty track on top and returns its id. */
+  addTrack() {
+    let id = null;
+    this.store.update((d) => {
+      const t = newTrack(d.captions);
+      d.captions.tracks.push(t);
+      id = t.id;
+    });
+    return id;
+  }
+
+  deleteTrack(id) {
+    const tracks = this.#tracks();
+    if (tracks.length < 2) return this.toast("There has to be at least one caption track.");
+    const t = this.#trackById(id);
+    this.store.update((d) => {
+      d.captions.words = d.captions.words.filter((w) => trackOf(w) !== id);
+      d.captions.tracks = d.captions.tracks.filter((x) => x.id !== id);
+    });
+    this.toast(`Deleted the track “${t?.name}” and its captions.`, { action: "Undo", onAction: () => this.store.undo() });
+  }
+
+  #renameTrack(id, nameEl) {
+    const t = this.#trackById(id);
+    if (!t) return;
+    const input = document.createElement("input");
+    input.className = "tl-track-input";
+    input.value = t.name;
+    input.setAttribute("aria-label", "Track name");
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      const v = input.value.trim();
+      if (save && v && v !== t.name) this.setTrack(id, { name: v.slice(0, 40) });
+      else { this.#trackKey = null; this.renderBlocks(); }
+    };
+    input.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Enter") finish(true);
+      if (ev.key === "Escape") finish(false);
+    });
+    input.addEventListener("blur", () => finish(true));
+  }
+
+  /** Which track row is at a height on screen; one past the top is the "new track" strip. */
+  #rankAt(clientY) {
+    const tracks = this.#tracks();
+    if (clientY < this.newTrackRow.getBoundingClientRect().bottom) return tracks.length;
+    for (const [id, row] of this.#rows) {
+      const r = row.getBoundingClientRect();
+      if (clientY >= r.top && clientY < r.bottom) return this.#rankOf(id);
+    }
+    return 0;
+  }
+
+  #rowTop(rank) {
+    const tracks = this.#tracks();
+    const el = rank >= tracks.length ? this.newTrackRow : this.#rows.get(tracks[rank].id);
+    return el.getBoundingClientRect().top;
+  }
+
+  /**
+   * Whether spans ({ rank, start, end }) fit where they'd go: inside the video, clear of the captions
+   * already on their tracks (apart from the lines in `ignore`), and not on a locked track.
+   */
+  #fits(spans, ignore = new Set()) {
+    const tracks = this.#tracks();
+    const words = this.#captions.words;
+    for (const s of spans) {
+      if (s.start < -1e-6 || s.end > this.#duration + 1e-6) return false;
+      if (s.rank >= tracks.length) continue;
+      const id = tracks[s.rank].id;
+      if (tracks[s.rank].locked) return false;
+      for (const l of this.#lines) {
+        if (ignore.has(l.from) || trackOf(words[l.from]) !== id) continue;
+        if (words[l.to - 1].end > s.start + 1e-6 && words[l.from].start < s.end - 1e-6) return false;
+      }
+    }
+    return true;
+  }
+
   /* ---------- caption blocks ---------- */
 
   renderBlocks() {
     this.renderGrades();
     const cap = this.#captions;
-    this.track.replaceChildren();
-    if (!cap || !this.#media) { this.#lines = []; return; }
+    this.#renderTracks();
+    for (const row of this.#rows.values()) row.replaceChildren();
+    if (!cap || !this.#media) { this.#lines = []; this.#status(); return; }
     const { words } = cap;
     this.#lines = groupLines(words, cap.perLine);
     const ids = new Set(this.#lines.map((l) => words[l.from].id));
     for (const id of [...this.selection]) if (!ids.has(id)) this.selection.delete(id);
+    const fps = this.#fps;
 
     this.#lines.forEach((line, k) => {
       const { start, end } = lineTimes(words, this.#lines, k);
       const id = words[line.from].id;
+      const track = trackOf(words[line.from]);
+      const row = this.#rows.get(track);
+      if (!row) return;
       const el = document.createElement("div");
       el.className = "tl-clip";
       el.dataset.k = k;
+      el.dataset.track = track;
       el.style.left = `${start * this.px}px`;
       el.style.width = `${Math.max(2, (end - start) * this.px)}px`;
       const selected = this.selection.has(id);
       el.classList.toggle("selected", selected);
       el.title = words.slice(line.from, line.to).map((w) => w.text).join(" ");
-      const placed = words[line.from].group != null ? cap.overrides?.[words[line.from].group]?.y : null;
+      const group = words[line.from].group;
+      const own = group != null ? cap.overrides?.[group] : null;
+      const placed = own?.y;
       if (placed != null) {
         // Captions moved on their own show where they sit.
         el.dataset.place = placed < 0.4 ? "↑" : placed < 0.68 ? "•" : "↓";
         el.title += placed < 0.4 ? " (top)" : placed < 0.68 ? " (middle)" : " (bottom)";
+      }
+      // Like Premiere's fx badge: this caption has a look or animation of its own.
+      if (own && Object.keys(own).some((key) => key !== "x" && key !== "y")) {
+        el.classList.add("has-fx");
+        el.title += " · its own style";
       }
 
       const count = line.to - line.from;
@@ -217,8 +419,28 @@ export class Timeline {
       } else {
         const text = document.createElement("span");
         text.className = "tl-clip-text";
-        text.textContent = el.title;
+        text.textContent = words.slice(line.from, line.to).map((w) => w.text).join(" ");
         el.append(text);
+      }
+
+      // The animation in and out, shaded like fades on a clip, with handles to drag their length.
+      const motion = resolveMotion(lineStyle(cap, words, line).motion);
+      const { tin, tout } = phaseLengths(motion, end - start, fps);
+      for (const [side, secs] of [["in", tin], ["out", tout]]) {
+        if (secs > 0) {
+          const ramp = document.createElement("div");
+          ramp.className = `tl-ramp ${side}`;
+          ramp.style.width = `${secs * this.px}px`;
+          el.append(ramp);
+        }
+        if (selected && motion?.plugin.durationKeys?.[side] && !this.#isLocked(track) && (end - start) * this.px > 24) {
+          const h = document.createElement("div");
+          h.className = `tl-fade ${side}`;
+          h.dataset.side = side;
+          h.style[side === "in" ? "left" : "right"] = `${secs * this.px}px`;
+          h.title = side === "in" ? "Drag to change how long it animates in" : "Drag to change how long it animates out";
+          el.append(h);
+        }
       }
       for (const side of ["left", "right"]) {
         const h = document.createElement("div");
@@ -226,7 +448,7 @@ export class Timeline {
         h.dataset.side = side;
         el.append(h);
       }
-      this.track.append(el);
+      row.append(el);
     });
     this.#status();
   }
@@ -255,9 +477,13 @@ export class Timeline {
 
   clearSelection() { this.select([]); }
 
-  selectAll() { this.select(this.#lines.map((l) => this.#captions.words[l.from].id)); }
+  /** Every caption on tracks that aren't locked. */
+  selectAll() {
+    const words = this.#captions.words;
+    this.select(this.#lines.filter((l) => !this.#isLocked(trackOf(words[l.from]))).map((l) => words[l.from].id));
+  }
 
-  /** Selected lines as index ranges, in time order. */
+  /** Selected lines as index ranges, in track order then time order. */
   #selectedLines() {
     const words = this.#captions.words;
     return this.#lines.filter((l) => this.selection.has(words[l.from].id));
@@ -269,20 +495,25 @@ export class Timeline {
 
   #commit(mutate, coalesce) { this.store.update((d) => mutate(d.captions), { coalesce }); }
 
+  /**
+   * Splits at the playhead: the selected captions under it, or else every caption under it on
+   * tracks that aren't locked, as Ctrl+K cuts through all targeted tracks in Premiere.
+   */
   splitAtPlayhead() {
     const t = this.video.currentTime;
     const words = this.#captions?.words ?? [];
-    const k = this.#lines.findIndex((l) => t > words[l.from].start && t < words[l.to - 1].end);
-    if (k < 0) return this.toast("Move the playhead over a caption to split it.");
-    const line = this.#lines[k];
-    let ok = false;
-    this.#commit((c) => { ok = splitLine(c, line, t); });
-    if (!ok) this.toast("That caption is one word, so there's nothing to split.");
+    const under = this.#lines.filter((l) => t > words[l.from].start && t < words[l.to - 1].end && !this.#isLocked(trackOf(words[l.from])));
+    if (!under.length) return this.toast("Move the playhead over a caption to split it.");
+    const chosen = under.filter((l) => this.selection.has(words[l.from].id));
+    let split = 0;
+    this.#commit((c) => { for (const line of chosen.length ? chosen : under) if (splitLine(c, line, t)) split++; });
+    if (!split) this.toast("That caption is one word, so there's nothing to split.");
   }
 
   mergeSelected() {
     const lines = this.#selectedLines();
     if (lines.length < 2) return this.toast("Select two or more neighbouring captions to merge.");
+    if (new Set(lines.map((l) => this.#lineTrack(l))).size > 1) return this.toast("Captions can only be merged with others on the same track.");
     // Merging spans everything between the first and last selected caption.
     this.#commit((c) => mergeLines(c, lines));
     this.select([this.#captions.words[lines[0].from].id]);
@@ -296,18 +527,43 @@ export class Timeline {
     this.toast(lines.length === 1 ? "Caption deleted" : `${lines.length} captions deleted`, { action: "Undo", onAction: () => this.store.undo() });
   }
 
-  /** Adds an empty-ish caption at time t in the gap it falls in, then opens it for typing. */
-  addAt(t) {
-    if (!this.#captions) return;
-    const words = this.#captions.words;
-    if (this.#lines.some((l) => t >= words[l.from].start && t < words[l.to - 1].end)) {
-      return this.toast("There's already a caption here. Move the playhead to a gap.");
+  /**
+   * Adds a caption at time t, then opens it for typing. With no track given it goes on the first
+   * track with room at t, so adding over an existing caption stacks a new one above it.
+   */
+  addAt(t, track = null) {
+    const cap = this.#captions;
+    if (!cap) return;
+    const words = cap.words;
+    const tracks = this.#tracks();
+    const roomOn = (rank) => {
+      if (rank < tracks.length && tracks[rank].locked) return null;
+      const id = rank < tracks.length ? tracks[rank].id : null;
+      const mine = this.#lines.filter((l) => trackOf(words[l.from]) === id);
+      if (mine.some((l) => t >= words[l.from].start && t < words[l.to - 1].end)) return null;
+      const next = mine.find((l) => words[l.from].start > t);
+      const end = Math.min(t + NEW_CAPTION_SECS, next ? words[next.from].start : this.#duration);
+      return end - t >= 0.3 ? end : null;
+    };
+    let rank = track != null ? this.#rankOf(track) : 0;
+    let end = roomOn(rank);
+    if (end == null && track != null) {
+      return this.toast(this.#isLocked(track) ? "That track is locked." : "There's already a caption here, or no room for one.");
     }
-    const next = this.#lines.find((l) => words[l.from].start > t);
-    const end = Math.min(t + NEW_CAPTION_SECS, next ? words[next.from].start : this.#duration);
-    if (end - t < 0.3) return this.toast("There isn't room for a caption here.");
+    while (end == null && rank < tracks.length) end = roomOn(++rank);
+    if (end == null) return this.toast("There isn't room for a caption here.");
     let id;
-    this.#commit((c) => { id = insertLine(c, t, end, "New caption"); });
+    this.#commit((c) => {
+      if (rank >= c.tracks.length) c.tracks.push(newTrack(c));
+      id = insertLine(c, t, end, "New caption", c.tracks[rank].id);
+      if (rank > 0) {
+        // Stacked captions start clear of the transcript: at the top, or the bottom if it's up there.
+        const group = c.words.find((w) => w.id === id).group;
+        c.overrides ??= {};
+        c.overrides[group] = { y: c.style.y < 0.4 ? PLACES.bottom : PLACES.top };
+      }
+    });
+    if (track == null && rank > 0) this.toast(`Added on C${rank + 1}, above the caption already here.`);
     this.select([id]);
     const k = this.#lines.findIndex((l) => this.#captions.words[l.from].id === id);
     if (k >= 0) this.editText(k);
@@ -351,15 +607,16 @@ export class Timeline {
   nudge(frames) {
     const lines = this.#selectedLines();
     if (!lines.length) return;
-    const step = frames / (this.#media?.fps || 30);
+    const step = frames / this.#fps;
     const delta = this.#clampMove(lines, step);
     if (delta !== 0) this.#commit((c) => moveLines(c, lines, delta), "nudge");
   }
 
-  /** Limits a move so the selection stays inside the video and clear of other captions. */
+  /** Limits a move along their tracks so the selection stays inside the video and clear of other captions. */
   #clampMove(lines, delta) {
     const words = this.#captions.words;
     const selected = new Set(lines.map((l) => l.from));
+    const sameTrack = (a, b) => trackOf(words[this.#lines[a].from]) === trackOf(words[this.#lines[b].from]);
     let min = -Infinity;
     let max = Infinity;
     for (const line of lines) {
@@ -367,11 +624,11 @@ export class Timeline {
       const start = words[line.from].start;
       const end = words[line.to - 1].end;
       let prev = k - 1;
-      while (prev >= 0 && selected.has(this.#lines[prev].from)) prev--;
+      while (prev >= 0 && sameTrack(prev, k) && selected.has(this.#lines[prev].from)) prev--;
       let next = k + 1;
-      while (next < this.#lines.length && selected.has(this.#lines[next].from)) next++;
-      const lo = prev >= 0 ? words[this.#lines[prev].to - 1].end : 0;
-      const hi = next < this.#lines.length ? words[this.#lines[next].from].start : this.#duration;
+      while (next < this.#lines.length && sameTrack(next, k) && selected.has(this.#lines[next].from)) next++;
+      const lo = prev >= 0 && sameTrack(prev, k) ? words[this.#lines[prev].to - 1].end : 0;
+      const hi = next < this.#lines.length && sameTrack(next, k) ? words[this.#lines[next].from].start : this.#duration;
       min = Math.max(min, lo - start);
       max = Math.min(max, hi - end);
     }
@@ -380,7 +637,7 @@ export class Timeline {
 
   /** Inline text editing on a block. */
   editText(k) {
-    const el = this.track.querySelector(`.tl-clip[data-k="${k}"]`);
+    const el = this.tracksBox.querySelector(`.tl-clip[data-k="${k}"]`);
     const line = this.#lines[k];
     if (!el || !line) return;
     const words = this.#captions.words;
@@ -410,6 +667,63 @@ export class Timeline {
     });
     input.addEventListener("blur", () => finish(true));
     input.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  }
+
+  /* ---------- copy, cut, paste, duplicate ---------- */
+
+  copySelected() {
+    const lines = this.#selectedLines();
+    if (!lines.length) return false;
+    this.#clipboard = copyLines(this.#captions, lines);
+    this.toast(lines.length === 1 ? "Copied 1 caption" : `Copied ${lines.length} captions`);
+    return true;
+  }
+
+  cutSelected() {
+    const lines = this.#selectedLines();
+    if (!lines.length) return;
+    this.#clipboard = copyLines(this.#captions, lines);
+    this.#commit((c) => deleteLines(c, lines));
+    this.clearSelection();
+    this.toast(lines.length === 1 ? "Cut 1 caption" : `Cut ${lines.length} captions`, { action: "Undo", onAction: () => this.store.undo() });
+  }
+
+  /** Pastes at the playhead (or `at`), on the copied captions' tracks or the first ones above with room. */
+  paste(at = this.video.currentTime, track = null) {
+    if (!this.#clipboard) return this.toast("Copy captions first (Ctrl+C).");
+    this.#pasteClip(this.#clipboard, at, track != null ? this.#rankOf(track) : null);
+  }
+
+  /** Copies the selected captions onto the tracks above them, at the same time, for stacking. */
+  duplicateSelected() {
+    const lines = this.#selectedLines();
+    if (!lines.length) return this.toast("Select captions to duplicate.");
+    const clip = copyLines(this.#captions, lines);
+    const words = this.#captions.words;
+    const at = Math.min(...lines.map((l) => words[l.from].start));
+    const lowest = Math.min(...lines.map((l) => this.#rankOf(this.#lineTrack(l))));
+    this.#pasteClip(clip, at, lowest + 1);
+  }
+
+  #pasteClip(clip, at, startRank) {
+    const tracks = this.#tracks();
+    const t0 = Math.max(0, Math.min(at, this.#duration - clip.duration));
+    const first = startRank ?? Math.min(...clip.lines.map((l) => Math.max(0, this.#rankOf(l.track))));
+    for (let base = Math.max(0, first); base <= tracks.length; base++) {
+      const spans = clip.lines.map((item) => ({
+        rank: base + item.trackOffset, start: t0 + item.words[0].start, end: t0 + item.words[item.words.length - 1].end,
+      }));
+      if (!this.#fits(spans)) continue;
+      let ids = [];
+      this.#commit((c) => {
+        const top = Math.max(...spans.map((s) => s.rank));
+        while (c.tracks.length <= top) c.tracks.push(newTrack(c));
+        ids = pasteLines(c, clip, t0, (item) => c.tracks[base + item.trackOffset].id);
+      });
+      this.select(ids);
+      return;
+    }
+    this.toast("There isn't room to paste there.");
   }
 
   /* ---------- snapping ---------- */
@@ -444,6 +758,41 @@ export class Timeline {
     if (at != null) line.style.transform = `translateX(${at * this.px}px)`;
   }
 
+  /** Scrubbing catches caption and grade edges while snapping is on. */
+  #scrubTime(clientX) {
+    const t = this.#timeAt(clientX);
+    if (!this.snapping) return t;
+    let best = t;
+    let dist = SNAP_PX / this.px;
+    for (const p of this.#editPoints()) {
+      if (Math.abs(p - t) < dist) { best = p; dist = Math.abs(p - t); }
+    }
+    return best;
+  }
+
+  /* ---------- dropping presets from the panel ---------- */
+
+  /**
+   * Lights up the captions a preset dragged to (x, y) would land on, and returns their first-word
+   * ids: the selection if it's dropped on a selected caption, or just the one under the pointer.
+   * Call with no position to clear the highlight.
+   */
+  dropHover(x, y) {
+    for (const el of this.tracksBox.querySelectorAll(".tl-clip.drop-target")) el.classList.remove("drop-target");
+    if (x == null || !this.#captions) return null;
+    const el = document.elementFromPoint(x, y)?.closest?.(".tl-clip");
+    if (!el || !this.tracksBox.contains(el)) return null;
+    const words = this.#captions.words;
+    const line = this.#lines[Number(el.dataset.k)];
+    if (!line || this.#isLocked(trackOf(words[line.from]))) return null;
+    const id = words[line.from].id;
+    const ids = this.selection.has(id) ? [...this.selection] : [id];
+    for (const c of this.tracksBox.querySelectorAll(".tl-clip")) {
+      if (ids.includes(words[this.#lines[Number(c.dataset.k)].from].id)) c.classList.add("drop-target");
+    }
+    return ids;
+  }
+
   /* ---------- pointer interactions ---------- */
 
   #bind() {
@@ -460,35 +809,41 @@ export class Timeline {
     $("tl-merge").addEventListener("click", () => this.mergeSelected());
     $("tl-delete").addEventListener("click", () => this.deleteSelected());
     $("tl-add").addEventListener("click", () => this.addAt(this.video.currentTime));
+    $("tl-add-track").addEventListener("click", () => this.addTrack());
+    this.newTrackRow.addEventListener("dblclick", () => this.addTrack());
     for (const id of ["tl-top", "tl-middle", "tl-bottom"]) $(id).addEventListener("click", () => this.place($(id).dataset.place));
 
     this.scroll.addEventListener("scroll", () => this.draw());
     this.scroll.addEventListener("wheel", (ev) => {
-      if (ev.ctrlKey) {
+      if (ev.ctrlKey || ev.altKey) {
+        // Ctrl or Alt and the wheel zoom around the pointer, as in Premiere and Resolve.
         ev.preventDefault();
         const r = this.scroll.getBoundingClientRect();
         this.zoomBy(ev.deltaY < 0 ? 1.2 : 1 / 1.2, this.#timeAt(ev.clientX), ev.clientX - r.left);
-      } else if (!ev.shiftKey && Math.abs(ev.deltaY) > Math.abs(ev.deltaX)) {
+      } else if (!ev.shiftKey && Math.abs(ev.deltaY) > Math.abs(ev.deltaX) && !this.#canScrollY(ev.deltaY)) {
         ev.preventDefault();
         this.scroll.scrollLeft += ev.deltaY;
       }
     }, { passive: false });
 
-    // Scrub by dragging on the ruler, or click the video and audio tracks to jump.
+    // Scrub by dragging on the ruler (catching edit points while snapping), or click the video
+    // and audio tracks to jump.
     for (const id of ["tl-ruler-row", "tl-video-row", "tl-audio-row"]) {
       $(id).addEventListener("pointerdown", (ev) => {
         if (ev.button !== 0) return;
         const el = ev.currentTarget;
         capture(el, ev.pointerId);
         this.video.pause();
-        this.onSeek(this.#timeAt(ev.clientX));
-        const move = (e) => this.onSeek(this.#timeAt(e.clientX));
+        const at = (x) => (id === "tl-ruler-row" ? this.#scrubTime(x) : this.#timeAt(x));
+        this.onSeek(at(ev.clientX));
+        const move = (e) => this.onSeek(at(e.clientX));
         el.addEventListener("pointermove", move);
         el.addEventListener("pointerup", () => el.removeEventListener("pointermove", move), { once: true });
       });
     }
 
-    this.track.addEventListener("pointerdown", (ev) => this.#pointerDown(ev));
+    this.tracksBox.addEventListener("pointerdown", (ev) => this.#pointerDown(ev));
+    this.tracksBox.addEventListener("contextmenu", (ev) => this.#captionContext(ev));
     this.grades.addEventListener("pointerdown", (ev) => this.#gradeDown(ev));
     this.grades.addEventListener("contextmenu", (ev) => this.#gradeContext(ev));
     this.grades.addEventListener("dblclick", (ev) => {
@@ -498,11 +853,18 @@ export class Timeline {
       if (!$("context-menu").hidden && !ev.target.closest("#context-menu")) this.#closeMenu();
     }, true);
     document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") this.#closeMenu(); });
-    this.track.addEventListener("dblclick", (ev) => {
+    this.tracksBox.addEventListener("dblclick", (ev) => {
       const clip = ev.target.closest(".tl-clip");
+      const row = ev.target.closest(".tl-row.captions");
       if (clip) this.editText(Number(clip.dataset.k));
-      else this.addAt(this.#timeAt(ev.clientX));
+      else if (row) this.addAt(this.#timeAt(ev.clientX), Number(row.dataset.track));
     });
+  }
+
+  /** True when the tracks area can scroll vertically in that direction, so the wheel scrolls it. */
+  #canScrollY(dy) {
+    const body = this.scroll.parentElement;
+    return body.scrollHeight > body.clientHeight && (dy < 0 ? body.scrollTop > 0 : body.scrollTop + body.clientHeight < body.scrollHeight);
   }
 
   toggleSnapping() {
@@ -514,21 +876,36 @@ export class Timeline {
   #pointerDown(ev) {
     if (ev.button !== 0 || !this.#captions) return;
     if (ev.target.closest(".tl-clip-input")) return;
+    const row = ev.target.closest(".tl-row.captions");
+    if (!row) return;
     const clip = ev.target.closest(".tl-clip");
     const startX = ev.clientX;
-    capture(this.track, ev.pointerId);
+    const startY = ev.clientY;
 
     if (!clip) {
-      // Empty track: click clears the selection, drag draws a selection box.
-      this.#drag = { kind: "marquee", startX, additive: ev.shiftKey || ev.ctrlKey, base: new Set(this.selection) };
+      // Empty track: click clears the selection, drag draws a selection box across tracks.
+      this.#drag = { kind: "marquee", startX, startY, additive: ev.shiftKey || ev.ctrlKey, base: new Set(this.selection) };
     } else {
       const k = Number(clip.dataset.k);
       const line = this.#lines[k];
       const words = this.#captions.words;
       const id = words[line.from].id;
+      const track = trackOf(words[line.from]);
+      if (this.#isLocked(track)) {
+        this.toast(`“${this.#trackById(track)?.name}” is locked. Unlock it to edit its captions.`);
+        return;
+      }
       const edge = ev.target.closest(".tl-word-edge");
       const trim = ev.target.closest(".tl-trim");
-      if (edge) {
+      const fade = ev.target.closest(".tl-fade");
+      if (fade) {
+        const targets = this.selection.has(id) ? this.#selectedLines() : [line];
+        const motion = resolveMotion(lineStyle(this.#captions, words, line).motion);
+        const { start, end } = lineTimes(words, this.#lines, k);
+        const lengths = phaseLengths(motion, end - start, this.#fps);
+        const secs = fade.dataset.side === "in" ? lengths.tin : lengths.tout;
+        this.#drag = { kind: "fade", side: fade.dataset.side, startX, k, clip, targets, frames0: Math.round(secs * this.#fps), span: end - start };
+      } else if (edge) {
         this.#drag = { kind: "word", startX, k, i: Number(edge.dataset.word), clip };
       } else if (trim) {
         if (!this.selection.has(id)) this.select([id]);
@@ -541,40 +918,88 @@ export class Timeline {
           return;
         }
         if (!this.selection.has(id)) this.select([id]);
-        this.#drag = { kind: "move", startX, lines: this.#selectedLines() };
+        // Alt at the start of a drag copies instead of moving, as in Premiere.
+        this.#drag = { kind: "move", startX, startY, k, alt: ev.altKey, lines: this.#selectedLines() };
       }
     }
+    capture(this.tracksBox, ev.pointerId);
     const move = (e) => this.#pointerMove(e);
     const up = (e) => {
-      this.track.removeEventListener("pointermove", move);
+      this.tracksBox.removeEventListener("pointermove", move);
       this.#pointerUp(e);
     };
-    this.track.addEventListener("pointermove", move);
-    this.track.addEventListener("pointerup", up, { once: true });
-    this.track.addEventListener("pointercancel", up, { once: true });
+    this.tracksBox.addEventListener("pointermove", move);
+    this.tracksBox.addEventListener("pointerup", up, { once: true });
+    this.tracksBox.addEventListener("pointercancel", up, { once: true });
   }
 
   #pointerMove(ev) {
     const d = this.#drag;
     if (!d) return;
     const dx = ev.clientX - d.startX;
-    if (!d.active && Math.abs(dx) < DRAG_THRESHOLD_PX) return;
+    const dy = ev.clientY - (d.startY ?? ev.clientY);
+    if (!d.active && Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) return;
+    const starting = !d.active;
     d.active = true;
     const dt = dx / this.px;
     const words = this.#captions.words;
 
     if (d.kind === "move") {
+      const tracks = this.#tracks();
       const froms = new Set(d.lines.map((l) => l.from));
+      const ranks = d.lines.map((l) => this.#rankOf(trackOf(words[l.from])));
+      const anchor = this.#rankOf(trackOf(words[this.#lines[d.k].from]));
+      // Up and down the stack, one past the top making a new track, never below C1.
+      const shift = Math.min(tracks.length - Math.max(...ranks), Math.max(-Math.min(...ranks), this.#rankAt(ev.clientY) - anchor));
       const edges = d.lines.flatMap((l) => [words[l.from].start + dt, words[l.to - 1].end + dt]);
-      const snap = this.#snapOffset(edges, this.#snapTargets(froms));
-      d.delta = this.#clampMove(d.lines, dt + snap.offset);
-      this.#showSnap(snap.offset && d.delta === dt + snap.offset ? snap.at : null);
-      for (const el of this.track.querySelectorAll(".tl-clip.selected")) el.style.transform = `translateX(${d.delta * this.px}px)`;
+      const snap = this.#snapOffset(edges, this.#snapTargets(d.alt ? new Set() : froms));
+      let delta = dt + snap.offset;
+      if (!shift && !d.alt) {
+        delta = this.#clampMove(d.lines, delta);
+      } else {
+        const lo = Math.min(...d.lines.map((l) => words[l.from].start));
+        const hi = Math.max(...d.lines.map((l) => words[l.to - 1].end));
+        delta = Math.min(this.#duration - hi, Math.max(-lo, delta));
+      }
+      const spans = d.lines.map((l, i) => ({ rank: ranks[i] + shift, start: words[l.from].start + delta, end: words[l.to - 1].end + delta }));
+      d.valid = !shift && !d.alt ? true : this.#fits(spans, d.alt ? new Set() : froms);
+      d.delta = delta;
+      d.shift = shift;
+      this.#showSnap(snap.offset && Math.abs(delta - (dt + snap.offset)) < 1e-9 ? snap.at : null);
+      if (starting) {
+        // A copy drags ghosts and leaves the originals where they are.
+        const originals = [...this.tracksBox.querySelectorAll(".tl-clip.selected")];
+        d.els = d.alt ? originals.map((el) => { const g = el.cloneNode(true); g.classList.add("dup"); el.after(g); return g; }) : originals;
+        d.rowTops = d.els.map((el) => el.parentElement.getBoundingClientRect().top);
+      }
+      d.els.forEach((el, i) => {
+        const rank = this.#rankOf(Number(el.dataset.track));
+        const y = shift ? this.#rowTop(Math.min(tracks.length, rank + shift)) - d.rowTops[i] : 0;
+        el.style.transform = `translate(${delta * this.px}px, ${y}px)`;
+        el.classList.toggle("invalid", !d.valid);
+      });
+      this.newTrackRow.classList.toggle("target", shift > 0 && Math.max(...ranks) + shift >= tracks.length);
+    } else if (d.kind === "fade") {
+      // Dragging a handle inward lengthens the animation; it can't pass the caption's middle.
+      const max = Math.floor(d.span * this.#fps);
+      d.frames = Math.max(0, Math.min(max, Math.round(d.frames0 + ((d.side === "in" ? dx : -dx) / this.px) * this.#fps)));
+      const px = (d.frames / this.#fps) * this.px;
+      const handle = d.clip.querySelector(`.tl-fade.${d.side}`);
+      handle.style[d.side === "in" ? "left" : "right"] = `${px}px`;
+      handle.dataset.frames = `${d.frames}f`;
+      let ramp = d.clip.querySelector(`.tl-ramp.${d.side}`);
+      if (!ramp) {
+        ramp = document.createElement("div");
+        ramp.className = `tl-ramp ${d.side}`;
+        d.clip.append(ramp);
+      }
+      ramp.style.width = `${px}px`;
     } else if (d.kind === "trim") {
       const line = this.#lines[d.k];
       const count = line.to - line.from;
-      const prev = this.#lines[d.k - 1];
-      const next = this.#lines[d.k + 1];
+      const track = trackOf(words[line.from]);
+      const prev = this.#lines[d.k - 1] && trackOf(words[this.#lines[d.k - 1].from]) === track ? this.#lines[d.k - 1] : null;
+      const next = this.#lines[d.k + 1] && trackOf(words[this.#lines[d.k + 1].from]) === track ? this.#lines[d.k + 1] : null;
       const exclude = new Set([line.from]);
       let start = d.start;
       let end = d.end;
@@ -591,7 +1016,7 @@ export class Timeline {
       }
       d.newStart = start;
       d.newEnd = end;
-      const el = this.track.querySelector(`.tl-clip[data-k="${d.k}"]`);
+      const el = this.tracksBox.querySelector(`.tl-clip[data-k="${d.k}"]`);
       el.style.left = `${start * this.px}px`;
       el.style.width = `${(end - start) * this.px}px`;
     } else if (d.kind === "word") {
@@ -612,15 +1037,26 @@ export class Timeline {
       const t1 = this.#timeAt(ev.clientX);
       const lo = Math.min(t0, t1);
       const hi = Math.max(t0, t1);
+      const y0 = Math.min(d.startY, ev.clientY);
+      const y1 = Math.max(d.startY, ev.clientY);
+      const top = this.content.getBoundingClientRect().top;
       const box = $("tl-marquee");
       box.hidden = false;
       box.style.left = `${lo * this.px}px`;
       box.style.width = `${(hi - lo) * this.px}px`;
+      box.style.top = `${y0 - top}px`;
+      box.style.height = `${Math.max(2, y1 - y0)}px`;
+      // Tracks the box reaches, unless they're locked.
+      const reached = new Set();
+      for (const [id, row] of this.#rows) {
+        const r = row.getBoundingClientRect();
+        if (r.bottom > y0 && r.top < y1 && !this.#isLocked(id)) reached.add(id);
+      }
       const hits = this.#lines
-        .filter((l) => words[l.to - 1].end > lo && words[l.from].start < hi)
+        .filter((l) => reached.has(trackOf(words[l.from])) && words[l.to - 1].end > lo && words[l.from].start < hi)
         .map((l) => words[l.from].id);
       this.selection = new Set([...(d.additive ? d.base : []), ...hits]);
-      for (const el of this.track.querySelectorAll(".tl-clip")) {
+      for (const el of this.tracksBox.querySelectorAll(".tl-clip")) {
         el.classList.toggle("selected", this.selection.has(words[this.#lines[Number(el.dataset.k)].from].id));
       }
     }
@@ -630,6 +1066,7 @@ export class Timeline {
     const d = this.#drag;
     this.#drag = null;
     this.#showSnap(null);
+    this.newTrackRow.classList.remove("target");
     $("tl-marquee").hidden = true;
     if (!d) return;
     if (!d.active) {
@@ -640,13 +1077,126 @@ export class Timeline {
       }
       return;
     }
-    if (d.kind === "move" && d.delta) this.#commit((c) => moveLines(c, d.lines, d.delta));
-    else if (d.kind === "trim" && d.newStart != null) {
+    if (d.kind === "move") {
+      if (!d.valid) {
+        this.toast("There's a caption in the way there, or the track is locked.");
+        this.renderBlocks();
+        return;
+      }
+      if (d.alt) {
+        const clip = copyLines(this.#captions, d.lines);
+        const words = this.#captions.words;
+        const at = Math.min(...d.lines.map((l) => words[l.from].start)) + d.delta;
+        const lowest = Math.min(...d.lines.map((l) => this.#rankOf(this.#lineTrack(l))));
+        let ids = [];
+        this.#commit((c) => {
+          const top = Math.max(...clip.lines.map((item) => lowest + d.shift + item.trackOffset));
+          while (c.tracks.length <= top) c.tracks.push(newTrack(c));
+          ids = pasteLines(c, clip, at, (item) => c.tracks[lowest + d.shift + item.trackOffset].id);
+        });
+        this.select(ids);
+        return;
+      }
+      if (d.delta || d.shift) {
+        this.#commit((c) => {
+          if (d.shift > 0) {
+            const top = Math.max(...d.lines.map((l) => c.tracks.findIndex((t) => t.id === trackOf(c.words[l.from])))) + d.shift;
+            while (c.tracks.length <= top) c.tracks.push(newTrack(c));
+          }
+          moveLines(c, d.lines, d.delta);
+          shiftTracks(c, d.lines, d.shift);
+        });
+      }
+    } else if (d.kind === "fade" && d.frames != null && d.frames !== d.frames0) {
+      this.#commit((c) => {
+        for (const line of d.targets) {
+          const m = resolveMotion(lineStyle(c, c.words, line).motion);
+          const key = m?.plugin.durationKeys?.[d.side];
+          if (!key) continue;
+          const group = lockLine(c, line);
+          c.overrides ??= {};
+          c.overrides[group] = { ...(c.overrides[group] ?? {}), motion: { plugin: m.plugin.id, preset: null, params: { ...m.params, [key]: d.frames } } };
+        }
+      });
+    } else if (d.kind === "trim" && d.newStart != null) {
       const line = this.#lines[d.k];
       this.#commit((c) => retimeLine(c, line, d.newStart, d.newEnd));
     } else if (d.kind === "word" && d.t != null) this.#commit((c) => setWordBoundary(c, d.i, d.t));
     else if (d.kind === "marquee") { this.renderBlocks(); this.onSelectionChange?.(this.selection); return; }
     this.renderBlocks();
+  }
+
+  /* ---------- caption and track context menus ---------- */
+
+  #captionContext(ev) {
+    ev.preventDefault();
+    const row = ev.target.closest(".tl-row.captions");
+    if (!row || !this.#captions) return;
+    const track = Number(row.dataset.track);
+    const t = this.#timeAt(ev.clientX);
+    const clip = ev.target.closest(".tl-clip");
+    const locked = this.#isLocked(track);
+    if (!clip) {
+      this.#openMenu(ev.clientX, ev.clientY, [
+        { label: "Paste here", icon: "#i-paste", disabled: !this.#clipboard || locked, action: () => this.paste(t, track) },
+        { label: "Add a caption here", icon: "#i-plus", disabled: locked, action: () => this.addAt(t, track) },
+        { sep: true },
+        { label: "Add a track", icon: "#i-layers", action: () => this.addTrack() },
+      ]);
+      return;
+    }
+    const words = this.#captions.words;
+    const line = this.#lines[Number(clip.dataset.k)];
+    const id = words[line.from].id;
+    if (!locked && !this.selection.has(id)) this.select([id]);
+    const lines = this.#selectedLines();
+    const n = lines.length;
+    const own = lines.some((l) => words[l.from].group != null && this.#captions.overrides?.[words[l.from].group]);
+    const tPlay = this.video.currentTime;
+    const splittable = lines.some((l) => tPlay > words[l.from].start && tPlay < words[l.to - 1].end && l.to - l.from > 1);
+    this.#openMenu(ev.clientX, ev.clientY, locked ? [
+      { label: "Unlock this track", icon: "#i-unlock", action: () => this.setTrack(track, { locked: false }) },
+    ] : [
+      { label: "Edit text", icon: "#i-type", disabled: n !== 1, action: () => this.editText(this.#lines.indexOf(lines[0])) },
+      { sep: true },
+      { label: "Cut", icon: "#i-scissors", hint: "Ctrl+X", action: () => this.cutSelected() },
+      { label: "Copy", icon: "#i-copy", hint: "Ctrl+C", action: () => this.copySelected() },
+      { label: "Paste at playhead", icon: "#i-paste", hint: "Ctrl+V", disabled: !this.#clipboard, action: () => this.paste() },
+      { label: "Duplicate onto the track above", icon: "#i-layers", hint: "Ctrl+D", action: () => this.duplicateSelected() },
+      { sep: true },
+      { label: "Split at playhead", icon: "#i-scissors", hint: "Ctrl+K", disabled: !splittable, action: () => this.splitAtPlayhead() },
+      { label: "Merge", icon: "#i-merge", hint: "M", disabled: n < 2, action: () => this.mergeSelected() },
+      { label: "Show at the top", icon: "#i-arrow-up", disabled: !n, action: () => this.place("top") },
+      { label: "Show at the bottom", icon: "#i-arrow-down", disabled: !n, action: () => this.place("bottom") },
+      { label: "Reset to the overall style", icon: "#i-undo", disabled: !own, action: () => this.#resetStyle(lines) },
+      { sep: true },
+      { label: n === 1 ? "Delete caption" : `Delete ${n} captions`, icon: "#i-trash", hint: "Del", danger: true, action: () => this.deleteSelected() },
+    ]);
+  }
+
+  #resetStyle(lines) {
+    this.#commit((c) => {
+      for (const line of lines) {
+        const group = c.words[line.from].group;
+        if (group != null) delete c.overrides?.[group];
+      }
+    });
+  }
+
+  #trackContext(ev, id) {
+    ev.preventDefault();
+    const t = this.#trackById(id);
+    if (!t) return;
+    const words = this.#captions.words;
+    this.#openMenu(ev.clientX, ev.clientY, [
+      { label: "Rename", icon: "#i-type", action: () => this.#renameTrack(id, this.heads.querySelector(`.tl-head[data-track="${id}"] .tl-track-name`)) },
+      { label: t.hidden ? "Show" : "Hide", icon: t.hidden ? "#i-eye" : "#i-eye-off", action: () => this.setTrack(id, { hidden: !t.hidden }) },
+      { label: t.locked ? "Unlock" : "Lock", icon: t.locked ? "#i-unlock" : "#i-lock", action: () => this.setTrack(id, { locked: !t.locked }) },
+      { label: "Select all on this track", icon: "#i-check", disabled: t.locked, action: () => this.select(this.#lines.filter((l) => trackOf(words[l.from]) === id).map((l) => words[l.from].id)) },
+      { sep: true },
+      { label: "Add a track", icon: "#i-layers", action: () => this.addTrack() },
+      { label: "Delete track", icon: "#i-trash", danger: true, disabled: this.#tracks().length < 2, action: () => this.deleteTrack(id) },
+    ]);
   }
 
   /* ---------- graded sections ---------- */
@@ -825,6 +1375,12 @@ export class Timeline {
       b.setAttribute("role", "menuitem");
       if (it.icon) b.innerHTML = `<svg class="icon"><use href="${it.icon}"/></svg>`;
       b.append(document.createTextNode(it.label));
+      if (it.hint) {
+        const hint = document.createElement("span");
+        hint.className = "menu-hint";
+        hint.textContent = it.hint;
+        b.append(hint);
+      }
       b.disabled = !!it.disabled;
       if (!it.disabled) b.addEventListener("click", () => { this.#closeMenu(); it.action(); });
       menu.append(b);

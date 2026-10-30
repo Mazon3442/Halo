@@ -27,10 +27,11 @@
 | --- | --- |
 | **Background blur and removal** | A matting model separates you from the room on every frame. Blur what's behind you, replace it with a solid color, or remove it and export with transparency. |
 | **Word-timed captions** | Whisper transcribes the speech on your machine, and every word gets its own timing. Pick how many words show at once and how the spoken word stands out. |
-| **19 caption styles** | Pop, Loud, Karaoke, Box, One word, Glow and more, each one a starting point for font, color, outline, shadow, box and entrance animation. Save your own next to them. |
+| **19 caption styles** | Pop, Loud, Karaoke, Box, One word, Glow and more, each one a starting point for font, color, outline, shadow, box and animation. Save your own next to them, and drag any of them onto single captions on the timeline. |
+| **Easy Motion and plugins** | Caption animations come from plugins. The built-in Easy Motion gives each caption an in and an out (direction, style, distance, frames), extras (scale, rotation, 3D tilt, blur, tracking, fade), a hold effect (float, slow push, pulse, swing, shake) and motion blur, with 17 presets. Add your own plugins as .js files. |
 | **Clean up in one pass** | Remove filler words ("um", "uh", "like") across the whole video, fix a misheard name everywhere with find and replace, or import an SRT you already have. |
 | **Color grading** | 27 looks, including Golden hour, Orange & Blue, Speakeasy, Kodak and Noir. Grade the whole video or just a stretch of it, add a .cube LUT or a Lightroom preset, and check the result on a waveform, RGB parade, vectorscope or histogram. |
-| **A real timeline** | Caption, color, video and audio tracks with thumbnails, a waveform and snapping. Drag, trim, split and merge captions, retime single words, and draw color grades straight onto the track. |
+| **A real timeline** | Stacked caption tracks, plus color, video and audio tracks with thumbnails, a waveform and snapping. Drag captions in time or between tracks, Alt-drag to copy, copy and paste, trim, split and merge, retime single words, lock and hide tracks, and draw color grades straight onto the track. |
 | **Exports that match the preview** | MP4 (H.264 or H.265, on NVENC when there is one), ProRes or WebM, with captions burned in or saved alongside as SRT. Transparent backgrounds export as ProRes 4444 or WebM with alpha. |
 | **Projects that keep themselves** | Every video gets an autosaved project, so reopening it brings your edits back. Everything is undoable. |
 | **Updates itself** | Halo checks for a new release when it starts and offers to install it. |
@@ -83,8 +84,20 @@ replace. Import an SRT file (YouTube, Premiere, anywhere) and it comes in styled
 ("Save current as…" puts the edited style next to the built-ins). Then font (bundled or any installed),
 size, case, spacing, colors, how the spoken word stands out, entrance animation, outline, shadow and
 background box. Drag the caption box on the video to place captions, or its corner to resize; safe-zone
-guides show roughly where TikTok, Reels and Shorts put their buttons. Switch to "Selected caption" to
-give one caption its own position, size and colors, and to color individual words.
+guides show roughly where TikTok, Reels and Shorts put their buttons. Switch to "Selected" to give the
+captions selected on the timeline a style and animation of their own, or drag a style or animation preset
+straight onto captions on the timeline. Select a single caption to color individual words.
+
+**Animation:** pick a preset (Pop, Slide up, Mask up, Whip, Zoom blur, Float and more), or open Easy
+Motion's sections to set the in and out yourself: a direction, a style (Slide, Mask, Whip, Glide, Spring,
+Bounce), distance and duration in frames, then extras, a hold effect and motion blur. Hover a preset to
+see it move, and press Preview to play the caption. On the timeline, each caption shows its in and out
+as shaded ramps; drag a selected caption's top corners to lengthen or shorten them. Animations are baked
+a frame at a time into the subtitle file, so the export moves exactly as the preview does.
+
+**Plugins:** animations are plugins, and Easy Motion is the built-in one. Drop more plugins (.js files)
+in `%APPDATA%\com.mazon.halo\plugins` (the Plugins folder button opens it) and they show up in the
+Animation menu next time Halo starts. [docs/plugins.md](docs/plugins.md) explains how to write one.
 
 **Color tab:** grades live on the Color track. Drag along an empty stretch of it to draw a grade of
 that length, or double-click it (or press "Add a 5s grade at the playhead") for a five-second one;
@@ -93,10 +106,17 @@ color sliders, and optionally a LUT: import a .cube file from Premiere, Resolve,
 or a Lightroom preset (.xmp). Save a look you like to use it again. Scopes (Ctrl+Shift+S) show a
 waveform, RGB parade, vectorscope and histogram of the graded frame.
 
-**Timeline:** caption, color, video and audio tracks with a ruler and playhead. Drag captions to move
-them, drag their edges to trim, split at the playhead (Ctrl+K), merge (M), add (A or double-click a
-gap), delete, nudge a frame at a time (Alt+arrows), box-select, and retime individual words by zooming
-in on a selected caption. Snapping (S) catches the playhead and neighbouring captions.
+**Timeline:** caption, color, video and audio tracks with a ruler and playhead. Caption tracks stack
+like video tracks in Premiere or Resolve: C1 holds the transcript, and captions on C2 and up show at the
+same time, drawn over it. Use them for a hook title over the subtitles, or for two speakers. Drag
+captions to move them, and drag them up or down to change tracks; dropping on the "New track" strip makes
+one. Alt-drag copies. Drag edges to trim, split at the playhead (Ctrl+K), merge (M), add (A, or
+double-click a gap; when the playhead is over a caption, the new one stacks on the next track), delete,
+nudge a frame at a time (Alt+arrows), box-select across tracks, and retime individual words by zooming
+in on a selected caption. Cut, copy and paste with Ctrl+X/C/V (pasting at the playhead), Ctrl+D
+duplicates onto the track above, and right-click a caption or track for more. Each track can be renamed,
+hidden or locked. Snapping (S) catches the playhead and neighbouring captions, and scrubbing the ruler
+stops on edit points. Up and Down jump between edit points; J, K and L shuttle.
 
 **Export (Ctrl+E):** pick the file name and folder (Windows' Save As dialog), format (H.264 or H.265
 MP4, ProRes MOV, WebM), resolution and quality, whether to burn in captions, and whether to save an
