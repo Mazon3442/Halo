@@ -242,7 +242,8 @@ export function createInspector({ store, timeline, video, toast }) {
     s.letterSpacing = `${st.spacing}em`;
     s.color = st.fill;
     if (st.outline > 0) {
-      s.webkitTextStroke = `${Math.max(1, Math.round(st.outline * 30))}px ${st.outlineColor}`;
+      const a = Math.round((st.outlineOpacity ?? 1) * 255).toString(16).padStart(2, "0");
+      s.webkitTextStroke = `${Math.max(1, Math.round(st.outline * 30))}px ${st.outlineColor}${a}`;
       s.paintOrder = "stroke fill";
     }
     if (st.shadow > 0) {
@@ -340,8 +341,11 @@ export function createInspector({ store, timeline, video, toast }) {
     // Inverted text takes its colours from the video, so the colour controls have nothing to do.
     $("st-fill").disabled = st.gradient !== "none" || st.invert;
     $("st-highlight").disabled = $("st-gradient").disabled = st.invert;
-    $("st-outline").value = Math.round(st.outline * 100);
+    // In tenths of a percent of the text size, so a hairline outline is within reach.
+    $("st-outline").value = Math.round(st.outline * 1000);
     $("st-outline-color").value = st.outlineColor;
+    $("st-outline-opacity-row").hidden = !(st.outline > 0);
+    $("st-outline-opacity").value = Math.round((st.outlineOpacity ?? 1) * 100);
     $("st-shadow").value = Math.round(st.shadow * 100);
     $("st-shadow-color").value = st.shadowColor;
     $("st-box").checked = st.box;
@@ -408,8 +412,9 @@ export function createInspector({ store, timeline, video, toast }) {
   $("st-fill-opacity").addEventListener("input", () => set("fillOpacity", Number($("st-fill-opacity").value) / 100));
   $("st-word").addEventListener("change", () => set("wordStyle", $("st-word").value));
   $("st-pop").addEventListener("change", () => set("wordPop", $("st-pop").checked));
-  $("st-outline").addEventListener("input", () => set("outline", Number($("st-outline").value) / 100));
+  $("st-outline").addEventListener("input", () => set("outline", Number($("st-outline").value) / 1000));
   $("st-outline-color").addEventListener("input", () => set("outlineColor", $("st-outline-color").value));
+  $("st-outline-opacity").addEventListener("input", () => set("outlineOpacity", Number($("st-outline-opacity").value) / 100));
   $("st-shadow").addEventListener("input", () => set("shadow", Number($("st-shadow").value) / 100));
   $("st-shadow-color").addEventListener("input", () => set("shadowColor", $("st-shadow-color").value));
   $("st-box").addEventListener("change", () => set("box", $("st-box").checked));
