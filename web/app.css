@@ -619,7 +619,7 @@ input[type=range].hsl-range::-webkit-slider-thumb { -webkit-appearance: none; wi
 .tl-grade.bypassed { opacity: .45; background-image: repeating-linear-gradient(135deg, transparent 0 6px, #0000004d 6px 12px); }
 .tl-grade.bypassed .tl-clip-text { text-decoration: line-through; }
 
-/* ---------- markers, In and Out, reading speed ---------- */
+/* ---------- markers, In and Out ---------- */
 .tl-markers { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 .tl-marker { position: absolute; top: 2px; width: 11px; height: 14px; margin-left: -5.5px; background: var(--mk); clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%); cursor: pointer; pointer-events: auto; touch-action: none; }
 .tl-marker:hover { filter: brightness(1.2); }
@@ -631,7 +631,6 @@ input[type=range].hsl-range::-webkit-slider-thumb { -webkit-appearance: none; wi
 .tl-range::before { content: ""; position: absolute; left: 0; right: 0; top: 18px; height: 8px; background: #7cc4ff38; }
 .tl-range.has-in { border-left: 1px solid #7cc4ffa6; }
 .tl-range.has-out { border-right: 1px solid #7cc4ffa6; }
-.tl-clip.fast { background-image: linear-gradient(0deg, #ff6b6b 0 2px, transparent 2px); }
 .menu-swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; margin: 0 2px; }
 .menu-check { width: 15px; flex: none; text-align: center; color: var(--accent); font-size: 12px; }
 
@@ -662,11 +661,7 @@ body.viewer-max .workspace, body.viewer-max .workspace.with-inspector { grid-tem
 body.viewer-max .stage { padding: 0; }
 body.viewer-max .screen { box-shadow: none; }
 
-/* ---------- caption list: search, reading speed, matches ---------- */
-.warn-chip { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; border: 1px solid #ff6b6b59; border-radius: var(--radius); background: #ff6b6b14; color: #ffb3b3; font-size: 12px; text-align: left; cursor: pointer; }
-.warn-chip:hover { background: #ff6b6b24; }
-.warn-chip .icon { width: 14px; height: 14px; color: #ff8a8a; }
-.line.fast input { text-decoration: underline wavy #ff6b6b99; text-underline-offset: 3px; text-decoration-skip-ink: none; }
+/* ---------- caption list: search, matches ---------- */
 .line.match { background: #ffd43b14; }
 .line.match .time { color: var(--warn); }
 .presets-row { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -338,17 +338,6 @@ export function sliceCaptions(captions, start, end) {
   return { ...captions, words };
 }
 
-/** Characters per second a viewer can comfortably read; Netflix's limit for adult English subtitles. */
-export const MAX_CPS = 20;
-/** The shortest a caption should stay up, in seconds. */
-export const MIN_SECS = 0.5;
-
-/** How fast a line reads: its characters (spaces included) over the time it's on screen. */
-export function readingSpeed(text, start, end) {
-  const secs = Math.max(0.01, end - start);
-  return { cps: text.length / secs, secs, fast: text.length / secs > MAX_CPS || (secs < MIN_SECS && text.length > 3) };
-}
-
 /** Adds a new caption line on a track; returns the id of its first word. */
 export function insertLine(captions, start, end, text, track = captions.tracks?.[0]?.id ?? 1) {
   const tokens = text.trim().split(/\s+/).filter(Boolean);
