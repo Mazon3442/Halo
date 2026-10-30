@@ -39,7 +39,7 @@ jobs:
           # and run on current Debian, Fedora, Arch, openSUSE and the rest.
           - { name: Linux, os: ubuntu-22.04 }
           # Apple Silicon. ONNX Runtime has no prebuilt Intel Mac build with CoreML.
-          - { name: macOS, os: macos-14 }
+          - { name: macOS, os: macos-latest }
     defaults:
       run:
         shell: bash

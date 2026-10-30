@@ -28,7 +28,7 @@ jobs:
         include:
           # The oldest supported Ubuntu, so what builds here builds on the distros it's older than.
           - { name: Linux, os: ubuntu-22.04 }
-          - { name: macOS, os: macos-14 }
+          - { name: macOS, os: macos-latest }
           - { name: Windows, os: windows-latest }
     defaults:
       run:
