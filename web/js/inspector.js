@@ -729,15 +729,20 @@ export function createInspector({ store, timeline, video, toast }) {
   const box = $("caption-box");
   const screen = $("screen");
 
+  /** The caption showing at the playhead, if any. */
+  function lineAtPlayhead() {
+    const cap = store.doc.captions;
+    const lines = groupLines(cap.words, cap.perLine);
+    const t = video.currentTime;
+    return lines.find((_, i) => { const r = lineTimes(cap.words, lines, i); return t >= r.start && t < r.end; }) ?? null;
+  }
+
   /** The caption showing at the playhead, or the longest one, sizes the box. */
   function referenceLine() {
     const cap = store.doc.captions;
-    const lines = groupLines(cap.words, cap.perLine);
     if (scope === "one") return selectedLines()[0] ?? null;
-    const t = video.currentTime;
-    const k = lines.findIndex((_, i) => { const r = lineTimes(cap.words, lines, i); return t >= r.start && t < r.end; });
-    if (k >= 0) return lines[k];
-    return lines.reduce((a, l) => (!a || l.to - l.from > a.to - a.from ? l : a), null);
+    const lines = groupLines(cap.words, cap.perLine);
+    return lineAtPlayhead() ?? lines.reduce((a, l) => (!a || l.to - l.from > a.to - a.from ? l : a), null);
   }
 
   // Fonts loaded into the page so the box can be sized to the real text.
@@ -786,7 +791,9 @@ export function createInspector({ store, timeline, video, toast }) {
     box.style.height = `${h}px`;
     box.style.left = `${st.x * cw - w / 2}px`;
     box.style.top = `${st.y * ch - h + pad / 2}px`;
-    box.querySelector(".caption-box-label").textContent = scope === "one" ? "Drag to move this caption" : "Drag to move all captions";
+    const alt = document.documentElement.classList.contains("mac") ? "⌥" : "Alt";
+    box.querySelector(".caption-box-label").textContent = scope === "one" ? "Drag to move this caption"
+      : lineAtPlayhead() ? `Drag to move all captions · ${alt}-drag to move just this one` : "Drag to move all captions";
   }
 
   new ResizeObserver(placeBox).observe(screen);
@@ -798,6 +805,13 @@ export function createInspector({ store, timeline, video, toast }) {
     ev.preventDefault();
     try { box.setPointerCapture(ev.pointerId); } catch { /* synthetic pointer */ }
     const resizing = ev.target === $("caption-box-handle");
+    // Alt-drag picks out the caption on screen, so it moves or resizes on its own.
+    const only = ev.altKey && scope !== "one" ? lineAtPlayhead() : null;
+    if (only) {
+      scope = "one";
+      timeline.select([store.doc.captions.words[only.from].id]);
+      toast("Moving just this caption. Choose All captions in the panel to move every caption again.");
+    }
     const st = shownStyle();
     const start = { x: ev.clientX, y: ev.clientY, sx: st.x, sy: st.y, size: st.size, h: box.clientHeight };
     const cw = screen.clientWidth;
