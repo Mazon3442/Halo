@@ -449,12 +449,8 @@ function trackRanks(captions) {
 /**
  * The subtitle file used both for the live overlay (libass in the page) and for burning into
  * the export (libass in ffmpeg). Each caption is one event per spoken word, showing the whole
-<<<<<<< HEAD
- * line with that word styled; karaoke and outline are one event per line using libass's own fill timing.
-=======
  * line with that word styled; karaoke is one event per line using libass's own fill timing.
  * Animations are baked frame by frame (see motion.js), so `fps` should be the video's.
->>>>>>> 8e5afa8b4b89c874f2a6ceb74b7b641c407701ce
  */
 export function buildAss(captions, width, height, opts = {}) {
   if (!captions.style.invert) return buildTrack(captions, width, height, opts);
@@ -498,26 +494,16 @@ function buildTrack(captions, width, height, { fps = 30, hideLetters = false } =
   const size = fs(base);
   const marginH = Math.round(((1 - base.width) / 2) * W);
   const outlinePx = (st) => Math.round(st.outline * fs(st) * 10) / 10;
-<<<<<<< HEAD
-  const karaoke = base.wordStyle === "karaoke";
-  const outline = base.wordStyle === "outline";
-=======
   const spacingPx = (st) => Math.round(st.spacing * fs(st) * 10) / 10;
   const shadowPx = (st) => Math.round(st.shadow * fs(st) * 10) / 10;
   const rate = fps > 0 ? fps : 30;
->>>>>>> 8e5afa8b4b89c874f2a6ceb74b7b641c407701ce
 
   const style = [
     "Default",
     base.font,
     size,
-<<<<<<< HEAD
-    outline ? assColor(base.fill, base.fillOpacity ?? 1) : karaoke ? assColor(base.highlight) : assColor(base.fill),
-    outline ? assColor(base.fill, 0) : assColor(base.fill),
-=======
     assColor(base.fill),
     assColor(base.fill),
->>>>>>> 8e5afa8b4b89c874f2a6ceb74b7b641c407701ce
     assColor(base.outlineColor),
     assColor(base.shadowColor, base.shadowOpacity),
     0, 0, 0, 0, 100, 100,
@@ -592,14 +578,6 @@ function buildTrack(captions, width, height, { fps = 30, hideLetters = false } =
       events.push({ layer: layerBase, from, to, style: "Box", head, body: () => text, alpha: { c1: 0, c3: st.boxOpacity, c4: st.boxOpacity }, kind: "box" });
     };
 
-<<<<<<< HEAD
-    if (karaoke || outline) {
-      // One event; libass sweeps each word from the secondary colour to the primary as it's spoken
-      // (outline fills transparent words to a frosted fill; karaoke sweeps fill to highlight).
-      const parts = lineWords.map((w, i) => {
-        const next = i < lineWords.length - 1 ? lineWords[i + 1].start : end;
-        const cs = Math.max(1, Math.round((next - w.start) * 100));
-=======
     const motion = resolveMotion(st.motion);
     const chars = [...lineWords.map(display).join(" ")].length;
     const textW = chars * size * (0.56 + st.spacing);
@@ -622,7 +600,6 @@ function buildTrack(captions, width, height, { fps = 30, hideLetters = false } =
       const body = (ms) => lineWords.map((w, i) => {
         const [a, b] = spans[i].map((s) => Math.max(0, s * 1000 - ms));
         const cs = ms ? Math.round((b - a) / 10) : Math.max(1, Math.round((spans[i][1] - spans[i][0]) * 100));
->>>>>>> 8e5afa8b4b89c874f2a6ceb74b7b641c407701ce
         return `{\\kf${cs}}${display(w)}`;
       }).join(" ");
       box(start, end);
@@ -655,6 +632,11 @@ function buildTrack(captions, width, height, { fps = 30, hideLetters = false } =
           // Words after this one only ever follow it, so their opacity needs no reset.
           if (hidesAhead && j > i) return `{\\alpha&HFF&}${display(w)}`;
           if (st.wordStyle === "dim" && j > i) return `{\\c${tagColor(colorOf(w))}\\alpha&H99&}${text(w, j)}`;
+          // Outline: every word is hollow, drawn by its outline alone, and the spoken word fills in.
+          if (st.wordStyle === "outline") {
+            const fill = j === i ? assColor("#000000", st.fillOpacity ?? 1).slice(2, 4) : "FF";
+            return `{\\c${tagColor(colorOf(w))}\\1a&H${fill}&}${text(w, j)}`;
+          }
           if (j !== i || st.wordStyle === "none" || st.wordStyle === "dim") return `{\\c${tagColor(colorOf(w))}}${text(w, j)}`;
           // A gradient is the colour, so the spoken word stands out by its animation instead.
           const painted = band || across;

@@ -27,12 +27,8 @@
 | --- | --- |
 | **Background blur and removal** | A matting model separates you from the room on every frame. Blur what's behind you, replace it with a solid color, or remove it and export with transparency. |
 | **Word-timed captions** | Whisper transcribes the speech on your machine, and every word gets its own timing. Pick how many words show at once and how the spoken word stands out. |
-<<<<<<< HEAD
-| **20 caption styles** | Pop, Loud, Karaoke, Outline, Box, One word, Glow and more, each one a starting point for font, color, outline, shadow, box and entrance animation. Save your own next to them. |
-=======
-| **19 caption styles** | Pop, Loud, Karaoke, Box, One word, Glow and more, each one a starting point for font, color, outline, shadow, box and animation. Save your own next to them, and drag any of them onto single captions on the timeline. |
+| **20 caption styles** | Pop, Loud, Karaoke, Outline, Box, One word, Glow and more, each one a starting point for font, color, outline, shadow, box and animation. Save your own next to them, and drag any of them onto single captions on the timeline. |
 | **Easy Motion and plugins** | Caption animations come from plugins. The built-in Easy Motion gives each caption an in and an out (direction, style, distance, frames), extras (scale, rotation, 3D tilt, blur, tracking, fade), a hold effect (float, slow push, pulse, swing, shake) and motion blur, with 17 presets. Add your own plugins as .js files. |
->>>>>>> 8e5afa8b4b89c874f2a6ceb74b7b641c407701ce
 | **Clean up in one pass** | Remove filler words ("um", "uh", "like") across the whole video, fix a misheard name everywhere with find and replace, or import an SRT you already have. |
 | **Color grading** | Graded the way a colorist works: log footage (Apple Log, S-Log3, V-Log, LogC3, Canon Log 3, D-Log) converted first, then grading in log with real white balance, pivoted contrast, shadow/midtone/highlight color wheels that keep skin tones clean, and print film emulation (Kodak 2383 and 2393, Fuji 3513, Vision3, bleach bypass, black and white). 16 looks built from those, previewed on your own frame. Grade the whole video or just a stretch of it, add a .cube LUT or a Lightroom preset, and check the result on a waveform, RGB parade, vectorscope or histogram. |
 | **A real timeline** | Stacked caption tracks, plus color, video and audio tracks with thumbnails, a waveform and snapping. Drag captions in time or between tracks, Alt-drag to copy, copy and paste, trim, split and merge, retime single words, lock and hide tracks, and draw color grades straight onto the track. |

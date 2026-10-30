@@ -16,7 +16,7 @@ const SAMPLES = {
   loud: `<span class="s-loud s-out">SO <span class="w">GOOD</span></span>`,
   clean: `<span class="s-clean">So good, right?</span>`,
   karaoke: `<span class="s-karaoke">So good, right</span>`,
-  outline: `<span class="s-outline">So good, right</span>`,
+  outline: `<span class="s-outline">so <span class="w">good</span> right</span>`,
   box: `<span class="s-box s-out">SO <span class="w">GOOD</span></span>`,
   oneword: `<span class="s-one s-out">GOOD</span>`,
   subtitle: `<span class="s-sub">So good, right?</span>`,
@@ -323,12 +323,7 @@ export function createInspector({ store, timeline, video, toast }) {
     $("st-fill-opacity-row").hidden = st.wordStyle !== "outline";
     $("st-fill-opacity").value = Math.round((st.fillOpacity ?? 1) * 100);
     $("st-pop").checked = st.wordPop;
-<<<<<<< HEAD
     $("st-pop").disabled = st.wordStyle === "karaoke" || st.wordStyle === "outline";
-    $("st-entrance").value = st.entrance;
-=======
-    $("st-pop").disabled = st.wordStyle === "karaoke";
->>>>>>> 8e5afa8b4b89c874f2a6ceb74b7b641c407701ce
     const g = st.gradientColors ?? [];
     $("st-gradient").value = st.gradient;
     $("st-gradient-row").hidden = $("st-g-mid-row").hidden = st.gradient === "none";

@@ -62,9 +62,9 @@ export const PRESETS = [
     style: { font: "Poppins ExtraBold", size: 0.075, uppercase: false, fill: "#ffffff", highlight: "#ffd43b", wordStyle: "karaoke", wordPop: false, motion: animation("fade"), outline: 0.08, shadow: 0, box: false, y: 0.76 },
   },
   {
-    // Hollow until spoken: a white outline that fills in word by word, frosted so the video shows through.
+    // Thin white outlines, hollow, with only the spoken word filled in solid.
     id: "outline", name: "Outline", perLine: 4,
-    style: { font: "Poppins ExtraBold", size: 0.085, uppercase: true, fill: "#ffffff", highlight: "#ffffff", fillOpacity: 0.8, wordStyle: "outline", wordPop: false, entrance: "fade", outline: 0.14, outlineColor: "#ffffff", shadow: 0, box: false, y: 0.74 },
+    style: { font: "Poppins ExtraBold", size: 0.08, uppercase: false, spacing: -0.03, fill: "#ffffff", highlight: "#ffffff", fillOpacity: 1, wordStyle: "outline", wordPop: false, motion: animation("fade"), outline: 0.035, outlineColor: "#ffffff", shadow: 0, box: false, y: 0.62 },
   },
   {
     id: "box", name: "Box", perLine: 3,
