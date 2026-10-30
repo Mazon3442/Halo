@@ -1,0 +1,91 @@
+# Builds and tests Halo on Linux, macOS and Windows for every pull request and every push to main.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Hosted runners sometimes drop crate downloads; retry harder over plain HTTP/1.1 connections.
+env:
+  CARGO_NET_RETRY: 10
+  CARGO_HTTP_MULTIPLEXING: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest supported Ubuntu, so what builds here builds on the distros it's older than.
+          - { name: Linux, os: ubuntu-22.04 }
+          - { name: macOS, os: macos-latest }
+          - { name: Windows, os: windows-latest }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libxdo-dev \
+            patchelf cmake clang ffmpeg
+          packaging/fetch-onnxruntime.sh
+
+      # ffmpeg decodes the test recording for the speech test.
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      # The Windows bundle lists ffmpeg.exe, ffprobe.exe and DirectML.dll as resources, which the build
+      # checks for and copies next to the app. ffmpeg can be a stand-in here; DirectML.dll has to be real
+      # (the app loads it), so it's taken from ort, which places it on its first build.
+      - name: Bundle resources (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p ffmpeg target/release
+          touch ffmpeg/ffmpeg.exe ffmpeg/ffprobe.exe
+          cargo build --locked -p ort-sys
+          cp -L target/debug/DirectML.dll target/release/DirectML.dll
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Test
+        run: cargo test --locked
+
+      # Linux and macOS run whisper.cpp inside Halo (Windows uses ffmpeg's): hear real speech with it.
+      - name: Speech recognition test
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL --retry 5 -o "$RUNNER_TEMP/ggml-tiny.en.bin" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin
+          curl -fsSL --retry 5 -o "$RUNNER_TEMP/jfk.wav" https://github.com/ggml-org/whisper.cpp/raw/master/samples/jfk.wav
+          HALO_TEST_WHISPER_MODEL="$RUNNER_TEMP/ggml-tiny.en.bin" HALO_TEST_SPEECH="$RUNNER_TEMP/jfk.wav" \
+            cargo test --locked transcribes_speech -- --ignored --nocapture
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the page's scripts parse
+        run: for f in web/js/*.js web/js/plugins/*.js; do node --check "$f" || exit 1; done

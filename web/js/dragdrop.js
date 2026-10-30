@@ -1,6 +1,6 @@
 // Dragging things from the panels onto captions on the timeline, the way effects and presets are
 // dragged onto clips in Premiere or Resolve. Pointer events rather than HTML drag and drop, which
-// the window's own file drop (for opening videos) takes over on Windows.
+// the window's own file drop (for opening videos) takes over.
 
 const THRESHOLD_PX = 5;
 

@@ -13,11 +13,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "nsis"
-    ],
     "category": "Video",
-    "shortDescription": "Local video background effects and captions",
+    "shortDescription": "Video background effects, captions and colour grading, on your own computer",
     "longDescription": "Blur, remove or replace the background of a video, and caption it. Runs matting and speech models on your own GPU.",
     "icon": [
       "icons/32x32.png",
@@ -28,9 +25,6 @@
     ],
     "resources": {
       "models/rvm_mobilenetv3_fp32.onnx": "models/rvm_mobilenetv3_fp32.onnx",
-      "target/release/DirectML.dll": "DirectML.dll",
-      "ffmpeg/ffmpeg.exe": "ffmpeg.exe",
-      "ffmpeg/ffprobe.exe": "ffprobe.exe",
       "web/": "web/"
     }
   },

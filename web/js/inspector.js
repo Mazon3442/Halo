@@ -70,7 +70,7 @@ export function createInspector({ store, timeline, video, toast }) {
     try { fonts = await api.get("/fonts"); } catch { fonts = []; }
     const select = $("st-font");
     select.replaceChildren();
-    const groups = [["Included with Halo", fonts.filter((f) => f.bundled)], ["Installed on this PC", fonts.filter((f) => !f.bundled)]];
+    const groups = [["Included with Halo", fonts.filter((f) => f.bundled)], ["Installed on this computer", fonts.filter((f) => !f.bundled)]];
     for (const [name, list] of groups) {
       if (!list.length) continue;
       const og = document.createElement("optgroup");

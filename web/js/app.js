@@ -29,12 +29,49 @@ const MODE_HINTS = {
   color: "Puts a solid color behind you, like a green screen.",
 };
 
+/* ---------- Mac key names ---------- */
+
+// Shortcuts are written for Windows and Linux. On a Mac, Ctrl means Command (the handlers take
+// either) and Alt is Option, so hints show ⌘ and ⌥ there.
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+document.documentElement.classList.toggle("mac", IS_MAC);
+
+/** A hint or message with Mac key names on a Mac. */
+function keyNames(text) {
+  if (!IS_MAC || typeof text !== "string") return text;
+  return text.replace(/\bCtrl\b/g, "⌘").replace(/\bAlt\b/g, "⌥");
+}
+
+const HINT_TEXT = ".kbd, .menu-hint, .hint, .shortcut";
+
+/** Rewrites the shortcut hints in `el` and inside it: titles, and the text of hint elements. */
+function macKeyHints(el) {
+  const fix = (node) => {
+    if (node.title) node.title = keyNames(node.title);
+    if (node.matches(HINT_TEXT)) {
+      for (const t of node.childNodes) if (t.nodeType === Node.TEXT_NODE) t.textContent = keyNames(t.textContent);
+    }
+  };
+  fix(el);
+  for (const node of el.querySelectorAll(`[title], ${HINT_TEXT}`)) fix(node);
+}
+if (IS_MAC) {
+  macKeyHints(document.body);
+  // Menus, toasts and panels drawn later.
+  new MutationObserver((changes) => {
+    for (const c of changes) {
+      if (c.type === "attributes") { if (/\b(Ctrl|Alt)\b/.test(c.target.title)) c.target.title = keyNames(c.target.title); continue; }
+      for (const n of c.addedNodes) if (n.nodeType === Node.ELEMENT_NODE) macKeyHints(n);
+    }
+  }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["title"] });
+}
+
 /* ---------- small helpers ---------- */
 
 let toastTimer = null;
 function toast(message, { action, onAction } = {}) {
   const el = $("toast");
-  el.replaceChildren(message);
+  el.replaceChildren(keyNames(message));
   if (action) {
     const b = document.createElement("button");
     b.className = "btn ghost";
@@ -870,7 +907,7 @@ async function refreshSpeech() {
   note.classList.toggle("error", s.state === "failed");
   note.textContent = s.state === "failed"
     ? `The download didn't finish: ${s.error}`
-    : "Captions use two models that run on this PC: one hears the words, one times each word exactly. It's a one-time download of up to 670 MB.";
+    : "Captions use two models that run on this computer: one hears the words, one times each word exactly. It's a one-time download of up to 670 MB.";
   $("speech-download").textContent = s.state === "failed" ? "Try again" : "Download speech models";
   if (s.state === "downloading") {
     const pct = s.total ? s.received / s.total : 0;
@@ -1311,7 +1348,9 @@ let holdingK = false;
 document.addEventListener("keydown", (ev) => {
   if (document.querySelector("dialog[open]") || ev.defaultPrevented) return;
   const ctrl = ev.ctrlKey || ev.metaKey;
-  const key = ev.key.toLowerCase();
+  // On a Mac, Option changes the character a letter key types (Option+F is "ƒ"), so shortcuts
+  // with Alt go by the key itself.
+  const key = ev.altKey && /^Key[A-Z]$/.test(ev.code) ? ev.code.slice(3).toLowerCase() : ev.key.toLowerCase();
   if (ctrl && key === "o") { ev.preventDefault(); chooseVideo(); return; }
   if (ev.key === "?" && !isTyping(ev.target)) { $("shortcuts-dialog").showModal(); return; }
   if (!media) return;
