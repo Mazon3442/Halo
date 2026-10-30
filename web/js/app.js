@@ -3,7 +3,7 @@ import { api } from "./api.js";
 import { Store, newDocument } from "./store.js";
 import {
   buildAss, buildMask, editLine, ensureIds, ensureTracks, findFillers, findIndexes, groupLines, lineTimes, mergeLines, parseSrt,
-  readingSpeed, replaceIndexes, shiftTiming, sortWords, splitLine, stripFillers, trackOf, usedFonts,
+  replaceIndexes, shiftTiming, sortWords, splitLine, stripFillers, trackOf, usedFonts,
 } from "./captions.js";
 import { createExporter } from "./export.js";
 import { Timeline } from "./timeline.js";
@@ -1062,7 +1062,6 @@ function renderLines() {
   const find = $("fr-find").value.trim();
   const matches = new Set(find ? findIndexes(words, find) : []);
   const filter = $("lines-filter").value.trim().toLowerCase();
-  const fast = [];
   lineRows = lines.map((line, k) => {
     const { start, end } = lineTimes(words, lines, k);
     const row = document.createElement("div");
@@ -1070,9 +1069,6 @@ function renderLines() {
     row.dataset.start = start;
     row.dataset.end = end;
     const textNow = words.slice(line.from, line.to).map((w) => w.text).join(" ");
-    const speed = readingSpeed(textNow, start, end);
-    if (speed.fast) fast.push(words[line.from].id);
-    row.classList.toggle("fast", speed.fast);
     let hit = false;
     for (let i = line.from; i < line.to; i++) if (matches.has(i)) hit = true;
     row.classList.toggle("match", hit);
@@ -1095,9 +1091,7 @@ function renderLines() {
     input.value = textNow;
     input.spellcheck = true;
     input.setAttribute("aria-label", `Caption at ${shortTime(start)}`);
-    input.title = speed.fast
-      ? `${Math.round(speed.cps)} characters a second over ${speed.secs.toFixed(1)}s: faster than most people can read. Shorten it, or give it more time.`
-      : "Enter: next caption · Shift+Enter: split at the cursor · Backspace at the start: join with the caption before";
+    input.title = "Enter: next caption · Shift+Enter: split at the cursor · Backspace at the start: join with the caption before";
     const commit = () => {
       const current = words.slice(line.from, line.to).map((w) => w.text).join(" ");
       if (input.value.trim() === current) return;
@@ -1160,10 +1154,6 @@ function renderLines() {
     return row;
   });
   if (focusIndex >= 0) lineRows[Math.min(focusIndex, lineRows.length - 1)]?.querySelector("input").focus();
-  const warn = $("lines-fast");
-  warn.hidden = fast.length === 0;
-  warn.querySelector("span").textContent = `${fast.length} caption${fast.length === 1 ? " reads" : "s read"} too fast`;
-  warn.onclick = () => { timeline.reveal(fast); toast(`Selected ${fast.length}. Shorten them, merge them with a neighbour, or drag their edges for more time.`); };
   markSelectedRows();
   highlightLine(video.currentTime);
 }

@@ -1,6 +1,6 @@
 // The caption style panel, plus the caption box on the player that moves and resizes captions.
-// Edits apply to every caption, or with "Selected" only to the captions selected on the timeline,
-// which then keep a look and animation of their own. Presets and animations can also be dragged
+// Edits apply to every caption, or, once some are selected on the timeline, only to those, which
+// then keep a look and animation of their own. Presets and animations can also be dragged
 // straight onto captions on the timeline.
 
 import { api } from "./api.js";
@@ -63,6 +63,7 @@ export function createInspector({ store, timeline, video, toast }) {
   let fonts = [];
   let scope = "all";
   let selectedWord = null;
+  let lastSelection = "";
 
   /* ---------- fonts ---------- */
 
@@ -242,7 +243,8 @@ export function createInspector({ store, timeline, video, toast }) {
     s.letterSpacing = `${st.spacing}em`;
     s.color = st.fill;
     if (st.outline > 0) {
-      s.webkitTextStroke = `${Math.max(1, Math.round(st.outline * 30))}px ${st.outlineColor}`;
+      const a = Math.round((st.outlineOpacity ?? 1) * 255).toString(16).padStart(2, "0");
+      s.webkitTextStroke = `${Math.max(1, Math.round(st.outline * 30))}px ${st.outlineColor}${a}`;
       s.paintOrder = "stroke fill";
     }
     if (st.shadow > 0) {
@@ -286,6 +288,13 @@ export function createInspector({ store, timeline, video, toast }) {
     const cap = doc.captions;
     const line = selectedLine();
     const chosen = selectedLines().length;
+    // Selecting some captions on the timeline edits just those; selecting none or every one
+    // edits them all. Picking the other scope by hand holds until the selection changes.
+    const selection = [...timeline.selection].sort().join(",");
+    if (selection !== lastSelection) {
+      lastSelection = selection;
+      scope = chosen && chosen < groupLines(cap.words, cap.perLine).length ? "one" : "all";
+    }
     if (scope === "one" && !chosen) scope = "all";
     $("scope-one").disabled = !chosen;
     $("scope-one-label").textContent = chosen > 1 ? `Selected (${chosen})` : "Selected caption";
@@ -340,8 +349,11 @@ export function createInspector({ store, timeline, video, toast }) {
     // Inverted text takes its colours from the video, so the colour controls have nothing to do.
     $("st-fill").disabled = st.gradient !== "none" || st.invert;
     $("st-highlight").disabled = $("st-gradient").disabled = st.invert;
-    $("st-outline").value = Math.round(st.outline * 100);
+    // In tenths of a percent of the text size, so a hairline outline is within reach.
+    $("st-outline").value = Math.round(st.outline * 1000);
     $("st-outline-color").value = st.outlineColor;
+    $("st-outline-opacity-row").hidden = !(st.outline > 0);
+    $("st-outline-opacity").value = Math.round((st.outlineOpacity ?? 1) * 100);
     $("st-shadow").value = Math.round(st.shadow * 100);
     $("st-shadow-color").value = st.shadowColor;
     $("st-box").checked = st.box;
@@ -408,8 +420,9 @@ export function createInspector({ store, timeline, video, toast }) {
   $("st-fill-opacity").addEventListener("input", () => set("fillOpacity", Number($("st-fill-opacity").value) / 100));
   $("st-word").addEventListener("change", () => set("wordStyle", $("st-word").value));
   $("st-pop").addEventListener("change", () => set("wordPop", $("st-pop").checked));
-  $("st-outline").addEventListener("input", () => set("outline", Number($("st-outline").value) / 100));
+  $("st-outline").addEventListener("input", () => set("outline", Number($("st-outline").value) / 1000));
   $("st-outline-color").addEventListener("input", () => set("outlineColor", $("st-outline-color").value));
+  $("st-outline-opacity").addEventListener("input", () => set("outlineOpacity", Number($("st-outline-opacity").value) / 100));
   $("st-shadow").addEventListener("input", () => set("shadow", Number($("st-shadow").value) / 100));
   $("st-shadow-color").addEventListener("input", () => set("shadowColor", $("st-shadow-color").value));
   $("st-box").addEventListener("change", () => set("box", $("st-box").checked));
@@ -724,15 +737,20 @@ export function createInspector({ store, timeline, video, toast }) {
   const box = $("caption-box");
   const screen = $("screen");
 
+  /** The caption showing at the playhead, if any. */
+  function lineAtPlayhead() {
+    const cap = store.doc.captions;
+    const lines = groupLines(cap.words, cap.perLine);
+    const t = video.currentTime;
+    return lines.find((_, i) => { const r = lineTimes(cap.words, lines, i); return t >= r.start && t < r.end; }) ?? null;
+  }
+
   /** The caption showing at the playhead, or the longest one, sizes the box. */
   function referenceLine() {
     const cap = store.doc.captions;
-    const lines = groupLines(cap.words, cap.perLine);
     if (scope === "one") return selectedLines()[0] ?? null;
-    const t = video.currentTime;
-    const k = lines.findIndex((_, i) => { const r = lineTimes(cap.words, lines, i); return t >= r.start && t < r.end; });
-    if (k >= 0) return lines[k];
-    return lines.reduce((a, l) => (!a || l.to - l.from > a.to - a.from ? l : a), null);
+    const lines = groupLines(cap.words, cap.perLine);
+    return lineAtPlayhead() ?? lines.reduce((a, l) => (!a || l.to - l.from > a.to - a.from ? l : a), null);
   }
 
   // Fonts loaded into the page so the box can be sized to the real text.
@@ -781,7 +799,9 @@ export function createInspector({ store, timeline, video, toast }) {
     box.style.height = `${h}px`;
     box.style.left = `${st.x * cw - w / 2}px`;
     box.style.top = `${st.y * ch - h + pad / 2}px`;
-    box.querySelector(".caption-box-label").textContent = scope === "one" ? "Drag to move this caption" : "Drag to move all captions";
+    const alt = document.documentElement.classList.contains("mac") ? "⌥" : "Alt";
+    box.querySelector(".caption-box-label").textContent = scope === "one" ? "Drag to move this caption"
+      : lineAtPlayhead() ? `Drag to move all captions · ${alt}-drag to move just this one` : "Drag to move all captions";
   }
 
   new ResizeObserver(placeBox).observe(screen);
@@ -793,6 +813,12 @@ export function createInspector({ store, timeline, video, toast }) {
     ev.preventDefault();
     try { box.setPointerCapture(ev.pointerId); } catch { /* synthetic pointer */ }
     const resizing = ev.target === $("caption-box-handle");
+    // Alt-drag picks out the caption on screen, so it moves or resizes on its own.
+    const only = ev.altKey && scope !== "one" ? lineAtPlayhead() : null;
+    if (only) {
+      timeline.select([store.doc.captions.words[only.from].id]);
+      toast("Moving just this caption. Click an empty spot on the timeline to move every caption again.");
+    }
     const st = shownStyle();
     const start = { x: ev.clientX, y: ev.clientY, sx: st.x, sy: st.y, size: st.size, h: box.clientHeight };
     const cw = screen.clientWidth;

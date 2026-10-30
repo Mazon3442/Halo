@@ -8,7 +8,7 @@
 import { api } from "./api.js";
 import {
   MIN_WORD, copyLines, deleteLines, editLine, groupLines, insertLine, lineStyle, lineTimes, lockLine, mergeLines,
-  moveLines, nextTrackId, pasteLines, readingSpeed, retimeLine, rippleDelete, setWordBoundary, shiftTracks, splitLine, trackOf,
+  moveLines, nextTrackId, pasteLines, retimeLine, rippleDelete, setWordBoundary, shiftTracks, splitLine, trackOf,
 } from "./captions.js";
 import { freeSpan } from "./grade.js";
 import { phaseLengths, resolveMotion } from "./motion.js";
@@ -407,11 +407,6 @@ export class Timeline {
       const selected = this.selection.has(id);
       el.classList.toggle("selected", selected);
       el.title = words.slice(line.from, line.to).map((w) => w.text).join(" ");
-      const speed = readingSpeed(el.title, start, end);
-      if (speed.fast) {
-        el.classList.add("fast");
-        el.title += ` · ${Math.round(speed.cps)} characters a second, faster than most people read`;
-      }
       const group = words[line.from].group;
       const own = group != null ? cap.overrides?.[group] : null;
       const placed = own?.y;
@@ -770,14 +765,6 @@ export class Timeline {
       .map((l) => words[l.from].id);
     this.select(ids);
     this.toast(ids.length ? `Selected ${ids.length} caption${ids.length === 1 ? "" : "s"} from the playhead on.` : "No captions after the playhead.");
-  }
-
-  /** Selects the captions with these first-word ids, and shows the first of them. */
-  reveal(ids) {
-    this.select(ids);
-    const words = this.#captions.words;
-    const first = this.#lines.find((l) => ids.includes(words[l.from].id));
-    if (first) this.#scrollTo(words[first.from].start);
   }
 
   #scrollTo(t) {

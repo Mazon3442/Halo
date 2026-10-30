@@ -338,17 +338,6 @@ export function sliceCaptions(captions, start, end) {
   return { ...captions, words };
 }
 
-/** Characters per second a viewer can comfortably read; Netflix's limit for adult English subtitles. */
-export const MAX_CPS = 20;
-/** The shortest a caption should stay up, in seconds. */
-export const MIN_SECS = 0.5;
-
-/** How fast a line reads: its characters (spaces included) over the time it's on screen. */
-export function readingSpeed(text, start, end) {
-  const secs = Math.max(0.01, end - start);
-  return { cps: text.length / secs, secs, fast: text.length / secs > MAX_CPS || (secs < MIN_SECS && text.length > 3) };
-}
-
 /** Adds a new caption line on a track; returns the id of its first word. */
 export function insertLine(captions, start, end, text, track = captions.tracks?.[0]?.id ?? 1) {
   const tokens = text.trim().split(/\s+/).filter(Boolean);
@@ -600,7 +589,7 @@ function buildTrack(captions, width, height, { fps = 30, hideLetters = false } =
     size,
     assColor(base.fill),
     assColor(base.fill),
-    assColor(base.outlineColor),
+    assColor(base.outlineColor, base.outlineOpacity ?? 1),
     assColor(base.shadowColor, base.shadowOpacity),
     0, 0, 0, 0, 100, 100,
     spacingPx(base),
@@ -658,12 +647,14 @@ function buildTrack(captions, width, height, { fps = 30, hideLetters = false } =
     if (spacingPx(st) !== spacingPx(base)) lineTags += `\\fsp${spacingPx(st)}`;
     if (ob !== outlinePx(base)) lineTags += `\\bord${ob}`;
     if (st.outlineColor !== base.outlineColor) lineTags += `\\3c${tagColor(st.outlineColor)}`;
+    const outlineAlpha = `\\3a&H${assColor("#000000", st.outlineOpacity ?? 1).slice(2, 4)}&`;
+    if ((st.outlineOpacity ?? 1) !== (base.outlineOpacity ?? 1)) lineTags += outlineAlpha;
     if (shadowPx(st) !== shadowPx(base)) lineTags += `\\shad${shadowPx(st)}`;
     if (st.shadowColor !== base.shadowColor) lineTags += `\\4c${tagColor(st.shadowColor)}`;
     if (st.shadowOpacity !== base.shadowOpacity) lineTags += `\\4a&H${assColor("#000000", st.shadowOpacity).slice(2, 4)}&`;
 
     const events = [];
-    const textAlpha = { c1: hideLetters ? 0 : 1, c3: 1, c4: st.shadowOpacity };
+    const textAlpha = { c1: hideLetters ? 0 : 1, c3: st.outlineOpacity ?? 1, c4: st.shadowOpacity };
     const layer = layerBase + (st.box ? 1 : 0);
     const box = (from, to) => {
       if (!st.box) return;
@@ -742,14 +733,15 @@ function buildTrack(captions, width, height, { fps = 30, hideLetters = false } =
             if (!painted) tags += `\\c${tagColor(st.highlight)}`;
           } else if (st.wordStyle === "box") {
             // A thick outline in the highlight colour reads as a rounded box behind the word.
-            tags += `\\c${tagColor(painted ? colorOf(w) : readableOn(st.highlight))}\\3c${tagColor(st.highlight)}\\bord${Math.round(size * 0.2)}`;
-            reset += `\\3c${tagColor(st.outlineColor)}\\bord${ob}`;
+            // It's solid whatever the outline's own opacity.
+            tags += `\\c${tagColor(painted ? colorOf(w) : readableOn(st.highlight))}\\3c${tagColor(st.highlight)}\\3a&H00&\\bord${Math.round(size * 0.2)}`;
+            reset += `\\3c${tagColor(st.outlineColor)}${outlineAlpha}\\bord${ob}`;
           } else if (st.wordStyle === "glow") {
-            tags += `\\c${tagColor(colorOf(w))}\\3c${tagColor(st.highlight)}\\bord${Math.round(size * 0.1)}\\blur${Math.round(size * 0.12)}`;
-            reset += `\\3c${tagColor(st.outlineColor)}\\bord${ob}\\blur0`;
+            tags += `\\c${tagColor(colorOf(w))}\\3c${tagColor(st.highlight)}\\3a&H00&\\bord${Math.round(size * 0.1)}\\blur${Math.round(size * 0.12)}`;
+            reset += `\\3c${tagColor(st.outlineColor)}${outlineAlpha}\\bord${ob}\\blur0`;
           } else if (st.wordStyle === "blur") {
             // Comes into focus as it fades in, the way Apple's captions do.
-            tags += `\\c${tagColor(colorOf(w))}\\alpha&HFF&\\blur${Math.round(size * 0.18)}\\t(0,240,\\alpha&H00&\\blur0)`;
+            tags += `\\c${tagColor(colorOf(w))}\\alpha&HFF&\\blur${Math.round(size * 0.18)}\\t(0,240,\\alpha&H00&${outlineAlpha}\\blur0)`;
           } else if (st.wordStyle === "pop-up") {
             tags += `\\c${tagColor(colorOf(w))}\\fscx40\\fscy40\\t(0,100,\\fscx115\\fscy115)\\t(100,170,\\fscx100\\fscy100)`;
             reset += "\\fscx100\\fscy100";

@@ -33,6 +33,7 @@ export const DEFAULT_STYLE = {
   motion: animation("pop"), // how each caption comes and goes, through an animation plugin
   outline: 0.09,       // as a fraction of the text size
   outlineColor: "#000000",
+  outlineOpacity: 1,
   shadow: 0,           // drop shadow distance, as a fraction of the text size
   shadowColor: "#000000",
   shadowOpacity: 0.6,
@@ -67,7 +68,7 @@ export const PRESETS = [
   {
     // Thin white outlines, hollow, with only the spoken word filled in solid.
     id: "outline", name: "Outline", perLine: 4,
-    style: { font: "Poppins ExtraBold", size: 0.08, uppercase: false, spacing: -0.03, fill: "#ffffff", highlight: "#ffffff", fillOpacity: 1, wordStyle: "outline", wordPop: false, motion: animation("fade"), outline: 0.035, outlineColor: "#ffffff", shadow: 0, box: false, y: 0.62 },
+    style: { font: "Poppins ExtraBold", size: 0.08, uppercase: false, spacing: -0.03, fill: "#ffffff", highlight: "#ffffff", fillOpacity: 1, wordStyle: "outline", wordPop: false, motion: animation("fade"), outline: 0.012, outlineColor: "#ffffff", shadow: 0, box: false, y: 0.62 },
   },
   {
     id: "box", name: "Box", perLine: 3,
