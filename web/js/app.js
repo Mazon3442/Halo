@@ -1,13 +1,17 @@
 import JASSUB from "/vendor/jassub/jassub.js";
 import { api } from "./api.js";
 import { Store, newDocument } from "./store.js";
-import { buildAss, buildMask, editLine, ensureIds, findIndexes, groupLines, lineTimes, parseSrt, replaceIndexes, stripFillers, usedFonts } from "./captions.js";
+import {
+  buildAss, buildMask, editLine, ensureIds, ensureTracks, findFillers, findIndexes, groupLines, lineTimes, parseSrt, replaceIndexes,
+  sortWords, stripFillers, trackOf, usedFonts,
+} from "./captions.js";
 import { createExporter } from "./export.js";
 import { Timeline } from "./timeline.js";
 import { createInspector } from "./inspector.js";
 import { createColorPanel } from "./color.js";
-import { bakeSections } from "./grade.js";
+import { bakeSections, needsTransform } from "./grade.js";
 import { normalizeStyle } from "./styles.js";
+import { loadUserPlugins } from "./plugins/registry.js";
 
 const $ = (id) => document.getElementById(id);
 const video = $("video");
@@ -71,7 +75,7 @@ function isTyping(el) {
 
 const savePrefs = () => api.put("/prefs", prefs).catch(() => {});
 const exporter = createExporter({
-  store, getMedia: () => media, getPrefs: () => prefs, savePrefs, toast, bakeGrades: () => bakeSections(store.doc.grade),
+  store, getMedia: () => media, getPrefs: () => prefs, savePrefs, toast, bakeGrades: () => bakeSections(store.doc.grade, media?.duration ?? 0),
 });
 const timeline = new Timeline({
   store,
@@ -189,6 +193,7 @@ async function openPath(path) {
   doc.name = opened.name;
   doc.video_path = opened.path;
   ensureIds(doc.captions);
+  ensureTracks(doc.captions);
   doc.captions.style = normalizeStyle(doc.captions.style);
   doc.captions.overrides ??= {};
   doc.grade ??= { sections: [], nextId: 1 };
@@ -198,6 +203,7 @@ async function openPath(path) {
   store.saveSoon(); // puts the video in the recent list
 
   document.documentElement.style.setProperty("--ar", `${media.width} / ${media.height}`);
+  document.documentElement.style.setProperty("--arn", String(media.width / media.height || 16 / 9));
   document.title = `${media.name} · Halo`;
   $("doc-name").textContent = media.name;
   $("doc-name").title = media.path;
@@ -344,7 +350,7 @@ function canCompare() {
   const doc = store.doc;
   if (!doc) return false;
   if (tab === "background") return doc.background.mode !== "none";
-  return tab === "color" && doc.grade.sections.length > 0;
+  return tab === "color" && (doc.grade.sections.length > 0 || needsTransform(doc.grade));
 }
 
 function updateEffect() {
@@ -428,7 +434,7 @@ function tick() {
 
 function togglePlay() {
   if (!media) return;
-  if (video.paused) video.play(); else video.pause();
+  if (video.paused) { video.playbackRate = 1; video.play(); } else video.pause();
 }
 
 function seekTo(t) {
@@ -520,12 +526,7 @@ $("transcribe").addEventListener("click", async () => {
     const words = await api.post(`/media/${forId}/transcribe`, { language: store.doc.captions.language });
     if (media?.id !== forId) return;
     const replacing = store.doc.captions.words.length > 0;
-    store.update((d) => {
-      d.captions.words = words;
-      d.captions.edits = 0;
-      d.captions.nextId = 1;
-      ensureIds(d.captions);
-    });
+    store.update((d) => replaceMainTrack(d.captions, words));
     status.textContent = words.length ? `${words.length} words transcribed.` : "No speech found in this video.";
     if (replacing) toast("Captions replaced", { action: "Undo", onAction: () => store.undo() });
   } catch (err) {
@@ -538,6 +539,22 @@ $("transcribe").addEventListener("click", async () => {
 });
 
 $("per-line").addEventListener("input", () => store.update((d) => (d.captions.perLine = Number($("per-line").value)), { coalesce: "perLine" }));
+
+/**
+ * Puts new words (a transcription or an imported SRT) on the first caption track, in place of the
+ * ones there. Captions stacked on the other tracks, and their styles, stay as they are.
+ */
+function replaceMainTrack(cap, words) {
+  const main = cap.tracks[0].id;
+  const kept = cap.words.filter((w) => trackOf(w) !== main);
+  const keptGroups = new Set(kept.map((w) => w.group).filter((g) => g != null));
+  for (const g of Object.keys(cap.overrides ?? {})) if (!keptGroups.has(Number(g))) delete cap.overrides[g];
+  cap.words = [...words.map((w) => ({ ...w, track: main })), ...kept];
+  // New groups have to number past the ones the kept captions use.
+  cap.edits = Math.max(0, ...keptGroups);
+  ensureIds(cap);
+  sortWords(cap);
+}
 
 /* ---------- caption cleanup: filler words, find and replace, SRT import ---------- */
 
@@ -566,7 +583,7 @@ $("clean-filler").addEventListener("click", () => {
   if (!cap || !cap.words.length) return toast("No captions yet. Generate or import some first.");
   const { words: next, removed } = stripFillers(cap);
   if (!removed) return toast("No filler words found.");
-  const found = findFillers(cap.words).map((w) => w.text.trim());
+  const found = findFillers(cap.words).map((i) => cap.words[i].text.trim());
   store.update((d) => { d.captions.words = next; });
   const list = found.slice(0, 10).map((w) => `"${w}"`).join(", ");
   toast(`Removed ${removed} filler word${removed === 1 ? "" : "s"}${found.length > 10 ? ", …" : ""}${list ? `: ${list}` : "."}`, { action: "Undo", onAction: () => store.undo() });
@@ -580,13 +597,7 @@ $("import-srt-file").addEventListener("change", async (ev) => {
   try {
     const words = parseSrt(await file.text());
     if (!words.length) return toast("Couldn't find any captions in that file.");
-    store.update((d) => {
-      const cap = d.captions;
-      cap.words = words.map((w) => ({ ...w, id: null, group: null }));
-      cap.edits = 0;
-      cap.overrides = {};
-      ensureIds(cap);
-    });
+    store.update((d) => replaceMainTrack(d.captions, words.map((w) => ({ ...w, id: null, group: null }))));
     toast(`Imported ${words.length} captions.`, { action: "Undo", onAction: () => store.undo() });
   } catch {
     toast("Couldn't read that file.");
@@ -744,8 +755,9 @@ async function showTrack(r, ass, fonts) {
 async function updateSubtitles() {
   if (!store.doc || !video.videoWidth) return;
   const cap = store.doc.captions;
-  const ass = buildAss(cap, video.videoWidth, video.videoHeight);
-  const mask = buildMask(cap, video.videoWidth, video.videoHeight);
+  const opts = { fps: media?.fps || 30 };
+  const ass = buildAss(cap, video.videoWidth, video.videoHeight, opts);
+  const mask = buildMask(cap, video.videoWidth, video.videoHeight, opts);
   const key = `${ass}\n${mask}`;
   if (key === lastAss) return;
   lastAss = key;
@@ -833,6 +845,10 @@ document.addEventListener("keydown", (ev) => {
   if (ctrl && key === "k") { ev.preventDefault(); splitAtPlayhead(); return; }
   if (ctrl && ev.shiftKey && key === "s") { ev.preventDefault(); if (tab === "color") color.toggleScopes(); return; }
   if (ctrl && key === "a") { ev.preventDefault(); timeline.selectAll(); return; }
+  if (ctrl && key === "c") { if (timeline.copySelected()) ev.preventDefault(); return; }
+  if (ctrl && key === "x") { ev.preventDefault(); timeline.cutSelected(); return; }
+  if (ctrl && key === "v") { ev.preventDefault(); timeline.paste(); return; }
+  if (ctrl && key === "d") { ev.preventDefault(); timeline.duplicateSelected(); return; }
   if (ev.altKey && (key === "arrowleft" || key === "arrowright")) {
     ev.preventDefault();
     timeline.nudge((key === "arrowleft" ? -1 : 1) * (ev.shiftKey ? 5 : 1));
@@ -860,6 +876,18 @@ document.addEventListener("keydown", (ev) => {
   if (key === " ") { ev.preventDefault(); togglePlay(); }
   else if (key === "arrowleft") { ev.preventDefault(); if (ev.shiftKey) seekTo(video.currentTime - 1); else stepFrames(-1); }
   else if (key === "arrowright") { ev.preventDefault(); if (ev.shiftKey) seekTo(video.currentTime + 1); else stepFrames(1); }
+  else if (key === "arrowup" || key === "arrowdown") {
+    // Jump between edit points, as Up and Down do in Premiere.
+    ev.preventDefault();
+    const at = timeline.editPoint(key === "arrowdown" ? 1 : -1);
+    if (at != null) { video.pause(); seekTo(at); }
+  }
+  // J, K and L shuttle. The player can't play backwards, so J steps back a second instead.
+  else if (key === "l") {
+    if (video.paused) { video.playbackRate = 1; video.play(); } else video.playbackRate = Math.min(4, video.playbackRate * 2);
+  }
+  else if (key === "k") { video.pause(); video.playbackRate = 1; }
+  else if (key === "j") { video.pause(); seekTo(video.currentTime - 1); }
   else if (key === "home") { ev.preventDefault(); seekTo(0); }
   else if (key === "end") { ev.preventDefault(); seekTo(video.duration || 0); }
   else if (key === "c" && !ev.repeat && (tab === "background" || tab === "color")) setComparing(true);
@@ -874,3 +902,6 @@ window.addEventListener("beforeunload", () => store.flush());
 prefs = await api.get("/prefs").catch(() => ({}));
 await inspector.loadFonts();
 showHome();
+loadUserPlugins(api).then((failed) => {
+  if (failed.length) toast(`Couldn't load ${failed.length === 1 ? "a plugin" : `${failed.length} plugins`}: ${failed[0]}`);
+});
