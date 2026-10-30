@@ -508,8 +508,19 @@ export function createInspector({ store, timeline, video, toast }) {
       filter: `blur(${Math.max(0, (tf.blur ?? 0) * 0.4)}px)`,
       letterSpacing: `${(tf.tracking ?? 0) * 0.5}em`,
     }));
-    for (const a of el.getAnimations()) a.cancel();
-    if (keyframes.length > 1) el.animate(keyframes, { duration: (keyframes.length / fps) * 1000, easing: "linear" });
+    for (const a of el.getAnimations({ subtree: true })) a.cancel();
+    if (keyframes.length < 2) return;
+    const duration = (keyframes.length / fps) * 1000;
+    // Letter by letter, each letter plays the same frames a little after the one before, moving
+    // and fading only, as the captions do.
+    const gap = Number(plugin.stagger?.(params)) || 0;
+    el.replaceChildren(...[...el.textContent].map((ch) => Object.assign(document.createElement("span"), { textContent: ch })));
+    if (!gap) return el.animate(keyframes, { duration, easing: "linear" });
+    const moves = frames.map((tf = {}, i) => ({ transform: `translate(${tf.x ?? 0}px, ${tf.y ?? 0}px)`, opacity: keyframes[i].opacity, filter: keyframes[i].filter }));
+    [...el.children].forEach((letter, i) => {
+      letter.style.display = "inline-block";
+      letter.animate(moves, { duration, delay: (i * gap / fps) * 1000, easing: "linear", fill: "backwards" });
+    });
   }
 
   function buildField(plugin, field) {
