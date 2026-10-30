@@ -108,7 +108,8 @@ svg.icon { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: no
 .field label, .label { color: var(--text-2); font-size: 12px; }
 .value { font-variant-numeric: tabular-nums; color: var(--text); font-size: 12px; min-width: 28px; text-align: right; }
 
-.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; gap: 2px; background: var(--bg-0); border: 1px solid var(--line-soft); border-radius: 8px; }
+/* Positioned so its hidden radios sit inside it: placed against the page instead, focusing one far down a panel scrolled the whole window. */
+.segmented { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; gap: 2px; background: var(--bg-0); border: 1px solid var(--line-soft); border-radius: 8px; }
 .segmented input { position: absolute; opacity: 0; pointer-events: none; }
 .segmented label { text-align: center; padding: 6px 0; border-radius: 5px; cursor: pointer; color: var(--text-2); font-size: 12px; }
 .segmented label:hover { color: var(--text); }

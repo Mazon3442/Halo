@@ -29,6 +29,10 @@ const MODE_HINTS = {
   color: "Puts a solid color behind you, like a green screen.",
 };
 
+// The window never scrolls, only the panels in it do. The browser still scrolls it to show a focused
+// control it thinks is out of view, which shoves the whole layout up, so that's undone at once.
+window.addEventListener("scroll", () => { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); });
+
 /* ---------- Mac key names ---------- */
 
 // Shortcuts are written for Windows and Linux. On a Mac, Ctrl means Command (the handlers take
