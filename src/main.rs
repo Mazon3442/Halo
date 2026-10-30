@@ -191,6 +191,9 @@ fn main() {
                 }
             });
             let _ = state.window.set(window);
+            // Only installed (release) copies check for updates. A `cargo run` build carries the
+            // placeholder version, so it would otherwise offer to "update" to a release on GitHub.
+            #[cfg(not(debug_assertions))]
             tauri::async_runtime::spawn(check_for_update(app.handle().clone()));
             Ok(())
         })
@@ -205,6 +208,7 @@ fn main() {
 
 /// Looks for a newer Halo on GitHub Releases and, if the user agrees, installs it and restarts.
 /// Being offline or there being no release yet is silent: updating never gets in the way.
+#[cfg(not(debug_assertions))]
 async fn check_for_update(app: tauri::AppHandle) {
     use tauri_plugin_updater::UpdaterExt;
     let Ok(updater) = app.updater() else { return };

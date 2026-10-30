@@ -9,7 +9,8 @@ export const DEFAULT_STYLE = {
   spacing: 0,          // letter spacing, as a fraction of the text size
   fill: "#ffffff",
   highlight: "#ffd43b",
-  wordStyle: "color",  // how the spoken word stands out: color, box, glow, karaoke, reveal, blur, dim, pop-up, none
+  fillOpacity: 1,      // opacity of the fill (outline and karaoke fill; < 1 reads as frosted glass)
+  wordStyle: "color",  // how the spoken word stands out: color, box, glow, karaoke, outline, reveal, blur, dim, pop-up, none
   wordPop: true,       // the spoken word grows slightly
   entrance: "pop",     // how each caption appears: pop, bounce, slide, fade, pop-up, none
   outline: 0.09,       // as a fraction of the text size
@@ -46,6 +47,11 @@ export const PRESETS = [
   {
     id: "karaoke", name: "Karaoke", perLine: 4,
     style: { font: "Poppins ExtraBold", size: 0.075, uppercase: false, fill: "#ffffff", highlight: "#ffd43b", wordStyle: "karaoke", wordPop: false, entrance: "fade", outline: 0.08, shadow: 0, box: false, y: 0.76 },
+  },
+  {
+    // Hollow until spoken: a white outline that fills in word by word, frosted so the video shows through.
+    id: "outline", name: "Outline", perLine: 4,
+    style: { font: "Poppins ExtraBold", size: 0.085, uppercase: true, fill: "#ffffff", highlight: "#ffffff", fillOpacity: 0.8, wordStyle: "outline", wordPop: false, entrance: "fade", outline: 0.14, outlineColor: "#ffffff", shadow: 0, box: false, y: 0.74 },
   },
   {
     id: "box", name: "Box", perLine: 3,

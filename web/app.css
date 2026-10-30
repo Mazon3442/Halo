@@ -334,6 +334,7 @@ dialog[open] { animation: rise .16s var(--ease); }
 .s-loud .w { color: #3be477; display: inline-block; animation: s-bounce 1.2s ease-in-out infinite; }
 .s-clean { font: 14px "Halo Poppins B"; color: #fff; text-shadow: 0 2px 6px #0009; animation: s-fade 2.4s ease-in-out infinite; }
 .s-karaoke { font: 16px "Halo Poppins XB"; background: linear-gradient(90deg, #ffd43b 50%, #fff 50%) 100% 0 / 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: s-sweep 2s linear infinite; }
+.s-outline { font: 16px "Halo Poppins XB"; color: transparent; -webkit-text-stroke: 1.5px #fff; background: linear-gradient(90deg, rgba(255,255,255,.8) 50%, rgba(255,255,255,0) 50%) 100% 0 / 200% 100%; -webkit-background-clip: text; background-clip: text; animation: s-sweep 2s linear infinite; }
 .s-box { font: 16px "Halo Poppins XB"; color: #fff; }
 .s-box .w { background: #7c5cff; border-radius: 6px; padding: 0 5px; animation: s-grow 1.4s ease-in-out infinite; display: inline-block; }
 .s-one { font: 28px "Halo Anton"; color: #fff; animation: s-grow 0.9s ease-in-out infinite; }

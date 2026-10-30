@@ -322,7 +322,11 @@
         <div class="group">
           <div class="group-title">Color</div>
           <div class="color-row"><label for="st-fill">Text</label><input type="color" id="st-fill"></div>
-          <div class="color-row"><label for="st-highlight" id="st-highlight-label">Spoken word</label><input type="color" id="st-highlight"></div>
+          <div class="color-row" id="st-highlight-row"><label for="st-highlight" id="st-highlight-label">Spoken word</label><input type="color" id="st-highlight"></div>
+          <div class="color-row global-only" id="st-fill-opacity-row">
+            <label for="st-fill-opacity">Text opacity</label>
+            <input type="range" id="st-fill-opacity" min="10" max="100" step="5">
+          </div>
           <div class="field global-only">
             <label for="st-gradient">Gradient</label>
             <select id="st-gradient">
@@ -350,6 +354,7 @@
               <option value="box">Highlight box</option>
               <option value="glow">Glow</option>
               <option value="karaoke">Karaoke fill</option>
+              <option value="outline">Outline fill</option>
               <option value="reveal">Reveal word by word</option>
               <option value="pop-up">Pop up word by word</option>
               <option value="blur">Blur in word by word</option>

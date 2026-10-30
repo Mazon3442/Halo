@@ -364,7 +364,7 @@ export function lineStyle(captions, words, line) {
 /**
  * The subtitle file used both for the live overlay (libass in the page) and for burning into
  * the export (libass in ffmpeg). Each caption is one event per spoken word, showing the whole
- * line with that word styled; karaoke is one event per line using libass's own fill timing.
+ * line with that word styled; karaoke and outline are one event per line using libass's own fill timing.
  */
 export function buildAss(captions, width, height) {
   if (!captions.style.invert) return buildTrack(captions, width, height);
@@ -404,13 +404,14 @@ function buildTrack(captions, width, height) {
   const marginH = Math.round(((1 - base.width) / 2) * W);
   const outlinePx = (st) => Math.round(st.outline * fs(st) * 10) / 10;
   const karaoke = base.wordStyle === "karaoke";
+  const outline = base.wordStyle === "outline";
 
   const style = [
     "Default",
     base.font,
     size,
-    karaoke ? assColor(base.highlight) : assColor(base.fill),
-    assColor(base.fill),
+    outline ? assColor(base.fill, base.fillOpacity ?? 1) : karaoke ? assColor(base.highlight) : assColor(base.fill),
+    outline ? assColor(base.fill, 0) : assColor(base.fill),
     assColor(base.outlineColor),
     assColor(base.shadowColor, base.shadowOpacity),
     0, 0, 0, 0, 100, 100,
@@ -487,8 +488,9 @@ function buildTrack(captions, width, height) {
       return tags;
     };
 
-    if (karaoke) {
-      // One event; libass sweeps each word from the fill colour to the highlight as it's spoken.
+    if (karaoke || outline) {
+      // One event; libass sweeps each word from the secondary colour to the primary as it's spoken
+      // (outline fills transparent words to a frosted fill; karaoke sweeps fill to highlight).
       const parts = lineWords.map((w, i) => {
         const next = i < lineWords.length - 1 ? lineWords[i + 1].start : end;
         const cs = Math.max(1, Math.round((next - w.start) * 100));

@@ -27,7 +27,7 @@
 | --- | --- |
 | **Background blur and removal** | A matting model separates you from the room on every frame. Blur what's behind you, replace it with a solid color, or remove it and export with transparency. |
 | **Word-timed captions** | Whisper transcribes the speech on your machine, and every word gets its own timing. Pick how many words show at once and how the spoken word stands out. |
-| **19 caption styles** | Pop, Loud, Karaoke, Box, One word, Glow and more, each one a starting point for font, color, outline, shadow, box and entrance animation. Save your own next to them. |
+| **20 caption styles** | Pop, Loud, Karaoke, Outline, Box, One word, Glow and more, each one a starting point for font, color, outline, shadow, box and entrance animation. Save your own next to them. |
 | **Clean up in one pass** | Remove filler words ("um", "uh", "like") across the whole video, fix a misheard name everywhere with find and replace, or import an SRT you already have. |
 | **Color grading** | 27 looks, including Golden hour, Orange & Blue, Speakeasy, Kodak and Noir. Grade the whole video or just a stretch of it, add a .cube LUT or a Lightroom preset, and check the result on a waveform, RGB parade, vectorscope or histogram. |
 | **A real timeline** | Caption, color, video and audio tracks with thumbnails, a waveform and snapping. Drag, trim, split and merge captions, retime single words, and draw color grades straight onto the track. |
@@ -79,7 +79,7 @@ you review the list through the captions, and one undo takes the whole cleanup b
 replace (Ctrl+H) fixes a name Whisper misheard everywhere at once, with the match count before you
 replace. Import an SRT file (YouTube, Premiere, anywhere) and it comes in styled like a transcription.
 
-**Caption style (Captions tab, right panel):** 19 presets, plus any you save from your own edits
+**Caption style (Captions tab, right panel):** 20 presets, plus any you save from your own edits
 ("Save current as…" puts the edited style next to the built-ins). Then font (bundled or any installed),
 size, case, spacing, colors, how the spoken word stands out, entrance animation, outline, shadow and
 background box. Drag the caption box on the video to place captions, or its corner to resize; safe-zone

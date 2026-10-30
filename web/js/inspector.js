@@ -13,6 +13,7 @@ const SAMPLES = {
   loud: `<span class="s-loud s-out">SO <span class="w">GOOD</span></span>`,
   clean: `<span class="s-clean">So good, right?</span>`,
   karaoke: `<span class="s-karaoke">So good, right</span>`,
+  outline: `<span class="s-outline">So good, right</span>`,
   box: `<span class="s-box s-out">SO <span class="w">GOOD</span></span>`,
   oneword: `<span class="s-one s-out">GOOD</span>`,
   subtitle: `<span class="s-sub">So good, right?</span>`,
@@ -266,8 +267,12 @@ export function createInspector({ store, timeline, video, toast }) {
     $("st-highlight").value = st.highlight;
     $("st-highlight-label").textContent = HIGHLIGHT_LABELS[st.wordStyle] ?? "Spoken word";
     $("st-word").value = st.wordStyle;
+    // Outline fills to the text colour itself, so the accent colour and word-pop don't apply.
+    $("st-highlight-row").hidden = st.wordStyle === "outline";
+    $("st-fill-opacity-row").hidden = st.wordStyle !== "outline";
+    $("st-fill-opacity").value = Math.round((st.fillOpacity ?? 1) * 100);
     $("st-pop").checked = st.wordPop;
-    $("st-pop").disabled = st.wordStyle === "karaoke";
+    $("st-pop").disabled = st.wordStyle === "karaoke" || st.wordStyle === "outline";
     $("st-entrance").value = st.entrance;
     const g = st.gradientColors ?? [];
     $("st-gradient").value = st.gradient;
@@ -336,6 +341,7 @@ export function createInspector({ store, timeline, video, toast }) {
   $("st-size").addEventListener("input", () => set("size", Number($("st-size").value) / 1000));
   $("st-fill").addEventListener("input", () => set("fill", $("st-fill").value));
   $("st-highlight").addEventListener("input", () => set("highlight", $("st-highlight").value));
+  $("st-fill-opacity").addEventListener("input", () => set("fillOpacity", Number($("st-fill-opacity").value) / 100));
   $("st-word").addEventListener("change", () => set("wordStyle", $("st-word").value));
   $("st-pop").addEventListener("change", () => set("wordPop", $("st-pop").checked));
   $("st-entrance").addEventListener("change", () => set("entrance", $("st-entrance").value));
