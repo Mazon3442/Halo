@@ -1,6 +1,6 @@
 // The caption style panel, plus the caption box on the player that moves and resizes captions.
-// Edits apply to every caption, or with "Selected" only to the captions selected on the timeline,
-// which then keep a look and animation of their own. Presets and animations can also be dragged
+// Edits apply to every caption, or, once some are selected on the timeline, only to those, which
+// then keep a look and animation of their own. Presets and animations can also be dragged
 // straight onto captions on the timeline.
 
 import { api } from "./api.js";
@@ -63,6 +63,7 @@ export function createInspector({ store, timeline, video, toast }) {
   let fonts = [];
   let scope = "all";
   let selectedWord = null;
+  let lastSelection = "";
 
   /* ---------- fonts ---------- */
 
@@ -287,6 +288,13 @@ export function createInspector({ store, timeline, video, toast }) {
     const cap = doc.captions;
     const line = selectedLine();
     const chosen = selectedLines().length;
+    // Selecting some captions on the timeline edits just those; selecting none or every one
+    // edits them all. Picking the other scope by hand holds until the selection changes.
+    const selection = [...timeline.selection].sort().join(",");
+    if (selection !== lastSelection) {
+      lastSelection = selection;
+      scope = chosen && chosen < groupLines(cap.words, cap.perLine).length ? "one" : "all";
+    }
     if (scope === "one" && !chosen) scope = "all";
     $("scope-one").disabled = !chosen;
     $("scope-one-label").textContent = chosen > 1 ? `Selected (${chosen})` : "Selected caption";
@@ -808,9 +816,8 @@ export function createInspector({ store, timeline, video, toast }) {
     // Alt-drag picks out the caption on screen, so it moves or resizes on its own.
     const only = ev.altKey && scope !== "one" ? lineAtPlayhead() : null;
     if (only) {
-      scope = "one";
       timeline.select([store.doc.captions.words[only.from].id]);
-      toast("Moving just this caption. Choose All captions in the panel to move every caption again.");
+      toast("Moving just this caption. Click an empty spot on the timeline to move every caption again.");
     }
     const st = shownStyle();
     const start = { x: ev.clientX, y: ev.clientY, sx: st.x, sy: st.y, size: st.size, h: box.clientHeight };
