@@ -1,5 +1,6 @@
-//! Video processing: ffmpeg decodes frames, Robust Video Matting (ONNX, on the GPU via
-//! DirectML) predicts a per-pixel alpha matte, we composite, and ffmpeg encodes the result.
+//! Video processing: ffmpeg decodes frames, Robust Video Matting (ONNX, on the GPU through
+//! DirectML on Windows and CoreML on macOS, on the CPU on Linux) predicts a per-pixel alpha
+//! matte, we composite, and ffmpeg encodes the result.
 
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
@@ -206,7 +207,33 @@ pub struct Preview {
 pub struct Engine {
     /// Locked per frame, so previews can slip in between frames of a running export.
     session: Mutex<Session>,
-    nvenc: bool,
+    /// The GPU's video encoder, when ffmpeg can use one here.
+    hardware: Option<HardwareEncoder>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum HardwareEncoder {
+    /// NVIDIA's, on Windows and Linux.
+    Nvenc,
+    /// Apple's, on macOS.
+    VideoToolbox,
+}
+
+/// Where ONNX Runtime runs the models: the GPU through DirectML on Windows and CoreML on Macs,
+/// the CPU on Linux (and anywhere the GPU backend won't load, which ONNX Runtime falls back
+/// from on its own). HALO_CPU=1 forces the CPU, to rule out a GPU driver when something's off.
+fn execution_providers() -> Vec<ep::ExecutionProviderDispatch> {
+    if std::env::var_os("HALO_CPU").is_some() {
+        return Vec::new();
+    }
+    #[cfg(windows)]
+    return vec![ep::DirectML::default().build()];
+    // ML Programs take the model's changing frame sizes; the older format would leave most of
+    // it on the CPU.
+    #[cfg(target_os = "macos")]
+    return vec![ep::CoreML::default().with_model_format(ep::coreml::ModelFormat::MLProgram).build()];
+    #[allow(unreachable_code)]
+    Vec::new()
 }
 
 impl Engine {
@@ -219,12 +246,12 @@ impl Engine {
             );
         }
         let session = Session::builder(&ort_env()?)?
-            .with_execution_providers([ep::DirectML::default().build()])
+            .with_execution_providers(execution_providers())
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .commit_from_file(model)?;
-        let nvenc = nvenc_available();
-        println!("model loaded; nvenc: {nvenc}");
-        Ok(Self { session: Mutex::new(session), nvenc })
+        let hardware = hardware_encoder();
+        println!("model loaded; hardware encoder: {hardware:?}");
+        Ok(Self { session: Mutex::new(session), hardware })
     }
 
     /// Runs queued exports one at a time.
@@ -383,13 +410,21 @@ impl Engine {
         match format {
             Format::H264 | Format::H265 => {
                 let hevc = format == Format::H265;
-                if self.nvenc {
-                    let cq = if hevc { quality.pick(["21", "25", "30"]) } else { quality.pick(["19", "23", "28"]) };
-                    encode.args(["-c:v", if hevc { "hevc_nvenc" } else { "h264_nvenc" }]);
-                    encode.args(["-preset", "p5", "-rc", "vbr", "-cq", cq, "-b:v", "0"]);
-                } else {
-                    let crf = if hevc { quality.pick(["20", "24", "29"]) } else { quality.pick(["18", "22", "27"]) };
-                    encode.args(["-c:v", if hevc { "libx265" } else { "libx264" }, "-preset", "medium", "-crf", crf]);
+                match self.hardware {
+                    Some(HardwareEncoder::Nvenc) => {
+                        let cq = if hevc { quality.pick(["21", "25", "30"]) } else { quality.pick(["19", "23", "28"]) };
+                        encode.args(["-c:v", if hevc { "hevc_nvenc" } else { "h264_nvenc" }]);
+                        encode.args(["-preset", "p5", "-rc", "vbr", "-cq", cq, "-b:v", "0"]);
+                    }
+                    Some(HardwareEncoder::VideoToolbox) => {
+                        // Constant quality, 1 to 100 (higher is better), which Apple Silicon supports.
+                        let q = if hevc { quality.pick(["65", "55", "45"]) } else { quality.pick(["70", "60", "50"]) };
+                        encode.args(["-c:v", if hevc { "hevc_videotoolbox" } else { "h264_videotoolbox" }, "-q:v", q]);
+                    }
+                    None => {
+                        let crf = if hevc { quality.pick(["20", "24", "29"]) } else { quality.pick(["18", "22", "27"]) };
+                        encode.args(["-c:v", if hevc { "libx265" } else { "libx264" }, "-preset", "medium", "-crf", crf]);
+                    }
                 }
                 if hevc {
                     // Lets Apple players and Premiere recognise HEVC in MP4.
@@ -1065,14 +1100,22 @@ impl Hdr {
     }
 }
 
-fn nvenc_available() -> bool {
-    tool("ffmpeg")
-        .args(["-v", "error", "-f", "lavfi", "-i", "color=s=256x256", "-frames:v", "1"])
-        .args(["-c:v", "h264_nvenc", "-f", "null", "-"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+/// The GPU encoder ffmpeg can use here, found by encoding one frame with it.
+fn hardware_encoder() -> Option<HardwareEncoder> {
+    let works = |codec: &str| {
+        tool("ffmpeg")
+            .args(["-v", "error", "-f", "lavfi", "-i", "color=s=256x256", "-frames:v", "1"])
+            .args(["-c:v", codec, "-f", "null", "-"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    if cfg!(target_os = "macos") {
+        works("h264_videotoolbox").then_some(HardwareEncoder::VideoToolbox)
+    } else {
+        works("h264_nvenc").then_some(HardwareEncoder::Nvenc)
+    }
 }
 
 /// Collects a child's stderr on a thread so a chatty ffmpeg can never block on a full pipe.
@@ -1085,11 +1128,12 @@ fn drain_stderr(child: &mut Child) -> std::thread::JoinHandle<String> {
     })
 }
 
-/// Starts ffmpeg/ffprobe without a console window flashing up behind the app.
+/// Starts ffmpeg/ffprobe (or curl) without a console window flashing up behind the app on Windows.
 ///
 /// The copy Halo ships with the app takes precedence, so an installed Halo doesn't depend on
 /// anything being on PATH; builds without the bundled binaries fall back to the usual lookup.
 pub fn tool(name: &str) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut cmd = Command::new(exe(name));
     #[cfg(windows)]
     {
@@ -1100,13 +1144,23 @@ pub fn tool(name: &str) -> Command {
     cmd
 }
 
-/// ffmpeg/ffprobe to run: the bundled copy when there is one, else whatever is on PATH.
+/// The program to run for `name`: Halo's own copy next to its executable or among its resources,
+/// else the first on PATH. Apps opened from the Finder or Dock don't get the PATH a terminal has,
+/// so on macOS Homebrew's folders are looked in too.
 fn exe(name: &str) -> PathBuf {
+    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    let beside_exe = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf));
+    let homebrew = if cfg!(target_os = "macos") { ["/opt/homebrew/bin", "/usr/local/bin"].as_slice() } else { &[] };
     TOOLS_DIR
         .get()
-        .map(|dir| dir.join(format!("{name}.exe")))
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from(name))
+        .cloned()
+        .into_iter()
+        .chain(beside_exe)
+        .chain(std::env::var_os("PATH").iter().flat_map(std::env::split_paths).collect::<Vec<_>>())
+        .chain(homebrew.iter().map(PathBuf::from))
+        .map(|dir| dir.join(&file))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from(file))
 }
 
 static TOOLS_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -1122,7 +1176,38 @@ pub fn ort_env() -> Result<ort::environment::Environment> {
 }
 
 /// Where the installer put its own ffmpeg and ffprobe; set once at startup.
-pub fn use_tools_from(dir: PathBuf) {
+///
+/// Some Linux packages lose the files' executable bit on the way. Where the folder can't be
+/// fixed (a system folder, or a read-only AppImage), the tools are copied to `cache` and run
+/// from there instead.
+pub fn use_tools_from(dir: PathBuf, cache: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let runnable = |p: &Path| std::fs::metadata(p).is_ok_and(|m| m.permissions().mode() & 0o111 != 0);
+        let bundled: Vec<PathBuf> = ["ffmpeg", "ffprobe"].iter().map(|n| dir.join(n)).filter(|p| p.is_file()).collect();
+        let stuck: Vec<&PathBuf> = bundled
+            .iter()
+            .filter(|p| !runnable(p) && std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).is_err())
+            .collect();
+        if !stuck.is_empty() {
+            let copied = (|| -> std::io::Result<()> {
+                std::fs::create_dir_all(cache)?;
+                for path in &bundled {
+                    let to = cache.join(path.file_name().unwrap());
+                    std::fs::copy(path, &to)?;
+                    std::fs::set_permissions(&to, std::fs::Permissions::from_mode(0o755))?;
+                }
+                Ok(())
+            })();
+            if copied.is_ok() {
+                let _ = TOOLS_DIR.set(cache.to_path_buf());
+                return;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = cache;
     let _ = TOOLS_DIR.set(dir);
 }
 

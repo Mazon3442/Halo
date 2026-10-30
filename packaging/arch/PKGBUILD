@@ -1,0 +1,28 @@
+# Arch Linux package for Halo, built from the release's .deb (an AUR "-bin" package).
+# Each release attaches a copy of this file with the version and checksum filled in; build it with:
+#   makepkg -si
+# From this template instead, set pkgver, _tag and _deb to a release and run `updpkgsums` first.
+
+pkgname=halo-bin
+pkgver=0.0.0
+pkgrel=1
+pkgdesc="Video background effects, captions and colour grading, on your own computer"
+arch=('x86_64')
+url="https://github.com/Mazon3442/Halo"
+license=('MIT')
+# WebKitGTK shows the editor; GStreamer and its codecs play videos in it. Halo brings its own ffmpeg.
+depends=('webkit2gtk-4.1' 'gtk3' 'gst-plugins-base' 'gst-plugins-good' 'gst-libav' 'curl')
+optdepends=('gst-plugins-bad: more video formats in the preview')
+provides=('halo')
+conflicts=('halo')
+options=('!strip' '!debug')
+_tag=v0.0.0
+_deb=Halo_0.0.0_amd64.deb
+source=("${_deb}::${url}/releases/download/${_tag}/${_deb}"
+        "LICENSE-${pkgver}::https://raw.githubusercontent.com/Mazon3442/Halo/${_tag}/LICENSE")
+sha256sums=('SKIP' 'SKIP')
+
+package() {
+  bsdtar -xf data.tar.gz -C "${pkgdir}"
+  install -Dm644 "LICENSE-${pkgver}" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

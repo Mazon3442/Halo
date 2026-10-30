@@ -6,11 +6,11 @@
   <img alt="Halo: background blur, captions and color grading for your videos, on your own GPU" src="docs/assets/brand/banner-dark.svg" width="100%">
 </picture>
 
-**Blur or remove the background behind you, caption every word, and color grade the result.<br>A desktop video editor for Windows that runs on your own GPU. Nothing leaves your computer.**
+**Blur or remove the background behind you, caption every word, and color grade the result.<br>A desktop video editor for Windows, macOS and Linux that runs on your own computer. Nothing leaves it.**
 
 [![Release](https://img.shields.io/github/v/release/Mazon3442/Halo?style=flat-square&color=7cc4ff&label=release)](https://github.com/Mazon3442/Halo/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-555?style=flat-square)](LICENSE)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-555?style=flat-square)](#install)
+[![Platforms: Windows, macOS, Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555?style=flat-square)](#install)
 [![Built with Tauri 2 and Rust](https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20Rust-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
 
 [Features](#features) · [Install](#install) · [Quick start](#quick-start) · [Using Halo](#using-halo) · [How it works](#how-it-works) · [Build from source](#build-from-source) · [Privacy](#privacy)
@@ -49,23 +49,66 @@
 
 ## Install
 
-Download `Halo_<version>_x64-setup.exe` from the [latest release](https://github.com/Mazon3442/Halo/releases/latest) and run it. Halo is for Windows 10 and 11, and uses any GPU with DirectX 12 for the background model. ffmpeg comes with the app, so there's nothing else to install.
+Everything is on the [latest release](https://github.com/Mazon3442/Halo/releases/latest). ffmpeg comes
+with Halo on every system, so there's nothing else to install.
 
-Installed copies update themselves: when a new release is out, Halo asks when it starts.
+| System | Download | Runs the background model on |
+| --- | --- | --- |
+| **Windows** 10 and 11 | `Halo_<version>_x64-setup.exe` | Any GPU with DirectX 12 (DirectML) |
+| **macOS** 12 or later, Apple Silicon (M1 and later) | `Halo_<version>_aarch64.dmg` | The GPU and Neural Engine (Core ML) |
+| **Ubuntu, Debian, Linux Mint, Pop!_OS** | `Halo_<version>_amd64.deb` | The CPU |
+| **Fedora, openSUSE, RHEL** | `Halo-<version>-1.x86_64.rpm` | The CPU |
+| **Arch, Manjaro, EndeavourOS** | `PKGBUILD` (or the AppImage) | The CPU |
+| **Any other Linux** | `Halo_<version>_amd64.AppImage` | The CPU |
+
+**Windows:** run the installer.
+
+**macOS:** open the .dmg and drag Halo to Applications. Halo isn't notarized by Apple, so the first
+time, right-click it and choose **Open** (on macOS 15 and later: try to open it, then press **Open
+Anyway** in System Settings › Privacy & Security). Intel Macs aren't supported: ONNX Runtime, which runs
+the background model, has no Core ML build for them.
+
+**Ubuntu and Debian:**
+
+```bash
+sudo apt install ./Halo_<version>_amd64.deb
+```
+
+**Fedora and openSUSE:** `sudo dnf install ./Halo-<version>-1.x86_64.rpm` (or `sudo zypper install`).
+Fedora's own codecs leave out H.264 and HEVC, which most videos use. If the preview stays black, add
+them with [RPM Fusion's multimedia guide](https://rpmfusion.org/Howto/Multimedia). Exports work either
+way, since Halo brings its own ffmpeg.
+
+**Arch:** download the release's `PKGBUILD` into an empty folder and run `makepkg -si` there.
+
+**AppImage:** make it executable and run it. It carries its own GStreamer, so videos play on any distro.
+
+```bash
+chmod +x Halo_<version>_amd64.AppImage && ./Halo_<version>_amd64.AppImage
+```
+
+On Linux, Halo needs WebKitGTK 4.1 (Ubuntu 22.04, Debian 12, Fedora 36 and later have it) and, for the
+preview to play videos, GStreamer's codecs; the packages ask for both. You can open a video from the
+command line too: `halo video.mp4`.
+
+**Updates:** the Windows and macOS apps and the AppImage update themselves: when a new release is out,
+Halo asks when it starts. The .deb, .rpm and Arch packages update like the rest of your system: install
+the new release's package over the old one.
 
 ## Quick start
 
-1. Open a video with **Ctrl+O**, or drop it on the window.
+1. Open a video with **Ctrl+O** (**⌘O** on a Mac), or drop it on the window.
 2. **Background:** pick **Blur** and pause anywhere to see it on that frame. Hold **C** to compare with the original.
 3. **Captions:** press **Generate captions**. The first time, press **Download speech models** before that (about 670 MB, once).
 4. **Color:** drag along the Color track to mark where a grade goes, then pick a look.
 5. Press **Ctrl+E** to export.
 
-Press **?** in the app for every shortcut.
+Press **?** in the app for every shortcut. On a Mac, Ctrl in a shortcut is ⌘ and Alt is ⌥; the app shows
+them that way.
 
 ## Using Halo
 
-Halo reads your video in place and keeps a project per video in `%APPDATA%\com.mazon.halo\projects`, autosaved, so reopening a file brings its edits back. Recent videos are listed on the start screen. Everything is undoable (Ctrl+Z / Ctrl+Shift+Z).
+Halo reads your video in place and keeps a project per video, autosaved, so reopening a file brings its edits back. Projects, saved looks, LUTs, plugins and the speech models live in Halo's data folder: `%APPDATA%\com.mazon.halo` on Windows, `~/Library/Application Support/com.mazon.halo` on macOS, and `~/.local/share/com.mazon.halo` on Linux. Recent videos are listed on the start screen. Everything is undoable (Ctrl+Z / Ctrl+Shift+Z).
 
 **Background tab:** None, Blur, Remove or Color. Pause anywhere to see the effect on that frame,
 rendered with the exact model and blur the export uses; hold C to compare with the original. Blur has
@@ -167,7 +210,7 @@ and O set In and Out (Alt+X clears them); looped playback (Ctrl+L) and Play In t
 volume or mute, show guides (action and title safe, rule of thirds, centre cross), go full screen
 (Shift+F), and save the frame as a full-size PNG with its grade and captions (Shift+E).
 
-**Export (Ctrl+E):** pick the file name and folder (Windows' Save As dialog), format (H.264 or H.265
+**Export (Ctrl+E):** pick the file name and folder (the system's Save As dialog), format (H.264 or H.265
 MP4, ProRes MOV, WebM), resolution and quality, whether to burn in captions, and whether to save an
 .srt alongside. Transparent backgrounds export as ProRes 4444 or WebM with alpha. "Captions only"
 exports a styled caption overlay with transparency, or the text as SRT or WebVTT. Exports run in the
@@ -178,10 +221,14 @@ export renders that stretch alone, captions, grades and audio included.
 ## How it works
 
 A Rust backend runs [Robust Video Matting](https://github.com/PeterL1n/RobustVideoMatting) through
-ONNX Runtime on your GPU (DirectML), transcribes speech with ffmpeg's built-in whisper.cpp (Vulkan),
-and uses ffmpeg for decoding, blurring, caption burn-in and encoding (NVENC when available). The
-window is a Tauri 2 webview talking to that backend over a local API, which requires a per-launch
-token that only Halo's window receives.
+ONNX Runtime (on the GPU with DirectML on Windows and Core ML on macOS, on the CPU on Linux),
+transcribes speech with [whisper.cpp](https://github.com/ggml-org/whisper.cpp), and uses ffmpeg for
+decoding, blurring, caption burn-in and encoding (on the GPU with NVENC on NVIDIA cards and
+VideoToolbox on Macs). On Windows whisper.cpp runs inside the bundled ffmpeg, on the GPU through
+Vulkan; on macOS and Linux Halo runs it itself (Metal on Macs), since ffmpeg builds there rarely
+include it. The window is a Tauri 2 webview (WebView2 on Windows, WebKit on macOS, WebKitGTK on
+Linux) talking to that backend over a local API, which requires a per-launch token that only Halo's
+window receives.
 
 **Captions** are kept as a list of timed words. The page groups them into lines and writes one ASS
 subtitle file, which libass renders both in the page (jassub, WebAssembly) and in ffmpeg at export, so
@@ -196,8 +243,9 @@ differences give film its color crossover), saturation on light, the HSL mixer, 
 for log footage, and out-of-range colors pulled in along their own hue rather than clipped per
 channel. Any imported LUT comes last. The preview applies it to the video with WebGL, and the export applies the same
 LUT with ffmpeg's `lut3d`, so what you see is what you get. HDR video is brought to standard range as it's
-decoded, through a 65-point LUT on 16-bit RGB that reproduces how Chromium shows HLG and PQ on an ordinary
-screen (measured against it: within a code value on greys). Exports are converted to YUV with the
+decoded, through a 65-point LUT on 16-bit RGB that reproduces how Chromium (and so WebView2) shows HLG
+and PQ on an ordinary screen (measured against it: within a code value on greys). WebKit on macOS and
+Linux maps HDR its own way, so there an HDR clip's preview can differ a little from its export. Exports are converted to YUV with the
 Rec.709 matrix and tagged as Rec.709, where ffmpeg would otherwise use Rec.601 and tag nothing, which
 players read as Rec.709 and show shifted.
 
@@ -207,15 +255,49 @@ background blur is computed at quarter resolution. Pixel work is spread across a
 
 ## Build from source
 
-Needs Rust and Node (for the Tauri CLI). The matting model goes in `models/rvm_mobilenetv3_fp32.onnx`
-(from the RVM v1.0.0 release), and `ffmpeg/ffmpeg.exe` and `ffmpeg/ffprobe.exe` (the
-[gyan.dev](https://www.gyan.dev/ffmpeg/builds/) full build) are bundled by the installer, so nothing
-has to be on PATH.
+Needs Rust 1.85 or later and Node (for the Tauri CLI). The matting model is in
+`models/rvm_mobilenetv3_fp32.onnx` (from the RVM v1.0.0 release). Settings shared by every system are
+in `tauri.conf.json`; `tauri.windows.conf.json`, `tauri.macos.conf.json` and `tauri.linux.conf.json` add
+each system's packages.
+
+**Windows:** `ffmpeg/ffmpeg.exe` and `ffmpeg/ffprobe.exe` (the [gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
+full build, which has whisper) go in the installer, so nothing has to be on PATH.
 
 ```bash
 cargo build --release                    # DirectML.dll is copied next to the exe, which the bundle needs
 npx @tauri-apps/cli@2 build              # installer in target/release/bundle/nsis
 ```
+
+**Linux:** install WebKitGTK and the build tools first. A development build uses the ffmpeg on your
+PATH (any recent one: captions don't need its whisper filter there).
+
+```bash
+# Ubuntu / Debian
+sudo apt install build-essential libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libxdo-dev \
+  cmake clang ffmpeg gstreamer1.0-plugins-good gstreamer1.0-libav
+# Fedora
+sudo dnf install webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel libxdo-devel \
+  cmake clang ffmpeg-free gstreamer1-plugins-good
+# Arch
+sudo pacman -S --needed base-devel webkit2gtk-4.1 libappindicator-gtk3 librsvg xdotool cmake clang ffmpeg \
+  gst-plugins-good gst-libav
+
+cargo run                                # or: npx @tauri-apps/cli@2 build  (deb, rpm and AppImage)
+```
+
+Whisper runs on the CPU on Linux. With the Vulkan headers and `glslc` installed,
+`cargo build --release --features vulkan` runs it on the GPU instead.
+
+**macOS:** install Xcode's command line tools (`xcode-select --install`) and ffmpeg
+(`brew install ffmpeg`), then `cargo run`, or `npx @tauri-apps/cli@2 build` for the .app and .dmg.
+
+To bundle ffmpeg into a Linux or macOS package as the releases do, put `ffmpeg` and `ffprobe` in
+`ffmpeg/` and add them as resources:
+`npx @tauri-apps/cli@2 build --config '{"bundle":{"resources":{"ffmpeg/ffmpeg":"ffmpeg","ffmpeg/ffprobe":"ffprobe"}}}'`.
+`packaging/check-ffmpeg.sh` checks a build has everything Halo uses.
+
+If the background model misbehaves on a GPU, `HALO_CPU=1` runs it on the CPU instead, to rule the
+graphics driver out.
 
 `web/vendor/jassub` is [jassub](https://github.com/ThaUnknown/jassub) 2.5.23, bundled with esbuild into
 standalone files. `web/fonts` holds the caption fonts, each under its own open license (the license
@@ -223,9 +305,11 @@ files sit next to them).
 
 ### Release
 
-Push an annotated version tag and GitHub Actions (`.github/workflows/release.yml`) builds the installer,
-signs it for in-app updates and publishes a release; the tag's message becomes the release notes. The
-version comes from the tag, so there's nothing to bump.
+Push an annotated version tag and GitHub Actions (`.github/workflows/release.yml`) builds Halo on
+Windows, macOS and Linux, signs the builds for in-app updates and publishes one release with all of
+them, an Arch `PKGBUILD` filled in for it, and the update manifest; the tag's message becomes the
+release notes. The version comes from the tag, so there's nothing to bump. Every pull request is built
+and tested on all three by `.github/workflows/ci.yml`.
 
 ```bash
 git tag -a v0.3.0 -F notes.md
@@ -235,7 +319,10 @@ git push origin v0.3.0
 Installed copies check the latest release's `latest.json` on launch and offer to update. Updates are
 signed with the `TAURI_SIGNING_PRIVATE_KEY` repository secret, the private half of the `pubkey` in
 `tauri.conf.json` (kept locally in `~/.tauri/halo-updater.key`). Tags with a hyphen (`v1.0.0-beta.1`)
-become pre-releases, which installed copies don't update to.
+become pre-releases, which installed copies don't update to. macOS builds are signed ad hoc; with a
+Developer ID in the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
+`APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID` secrets they're signed and notarized instead, and open
+without the right-click.
 
 ## Privacy
 

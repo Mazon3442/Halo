@@ -1,4 +1,4 @@
-//! Fonts for captions: Halo's bundled fonts plus the ones installed on this PC.
+//! Fonts for captions: Halo's bundled fonts plus the ones installed on this computer.
 //!
 //! libass matches fonts by family name, so each file is listed under the family name stored in
 //! the font itself. The page loads the files it needs for the live preview, and exports copy them
@@ -34,8 +34,7 @@ impl Fonts {
         self.list.get_or_init(|| {
             let mut by_family: BTreeMap<String, FontEntry> = BTreeMap::new();
             let mut add = |dir: &Path, bundled: bool| {
-                let Ok(entries) = std::fs::read_dir(dir) else { return };
-                for path in entries.filter_map(|e| e.ok()).map(|e| e.path()) {
+                for path in font_files(dir) {
                     let is_font = path
                         .extension()
                         .and_then(|e| e.to_str())
@@ -53,11 +52,8 @@ impl Fonts {
                 }
             };
             add(&self.bundled_dir, true);
-            if let Some(windir) = std::env::var_os("WINDIR") {
-                add(&Path::new(&windir).join("Fonts"), false);
-            }
-            if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-                add(&Path::new(&local).join("Microsoft").join("Windows").join("Fonts"), false);
+            for dir in system_font_dirs() {
+                add(&dir, false);
             }
             by_family.into_values().enumerate().map(|(id, f)| FontEntry { id, ..f }).collect()
         })
@@ -83,4 +79,50 @@ fn family_name(path: &Path) -> Option<String> {
         .collect();
     let english = names.iter().find(|n| n.language() == ttf_parser::Language::English_UnitedStates);
     english.or(names.first()).and_then(|n| n.to_string()).filter(|s| !s.trim().is_empty())
+}
+
+/// Where this system keeps installed fonts: the system's folders and the user's own.
+fn system_font_dirs() -> Vec<PathBuf> {
+    let env = |name: &str| std::env::var_os(name).map(PathBuf::from);
+    let home = env("HOME");
+    let mut dirs = Vec::new();
+    if cfg!(windows) {
+        dirs.extend(env("WINDIR").map(|w| w.join("Fonts")));
+        dirs.extend(env("LOCALAPPDATA").map(|l| l.join("Microsoft").join("Windows").join("Fonts")));
+    } else if cfg!(target_os = "macos") {
+        dirs.extend(["/System/Library/Fonts", "/Library/Fonts"].map(PathBuf::from));
+        dirs.extend(home.map(|h| h.join("Library").join("Fonts")));
+    } else {
+        // The fontconfig defaults, which every Linux desktop uses, plus the XDG data folders
+        // Flatpak and some distros add.
+        dirs.extend(["/usr/share/fonts", "/usr/local/share/fonts"].map(PathBuf::from));
+        let data_home = env("XDG_DATA_HOME").or_else(|| home.as_ref().map(|h| h.join(".local").join("share")));
+        dirs.extend(data_home.map(|d| d.join("fonts")));
+        dirs.extend(home.map(|h| h.join(".fonts")));
+        if let Some(data_dirs) = std::env::var_os("XDG_DATA_DIRS") {
+            dirs.extend(std::env::split_paths(&data_dirs).map(|d| d.join("fonts")));
+        }
+    }
+    dirs.dedup();
+    dirs
+}
+
+/// Every file in `dir` and the folders inside it (Linux keeps fonts a few folders deep), up to a
+/// sensible depth, without following links round in circles.
+fn font_files(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut stack = vec![(dir.to_path_buf(), 0)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(t) if t.is_dir() && depth < 6 => stack.push((path, depth + 1)),
+                Ok(t) if !t.is_dir() => files.push(path),
+                _ => {}
+            }
+        }
+    }
+    files.sort();
+    files
 }

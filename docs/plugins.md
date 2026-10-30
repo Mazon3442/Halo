@@ -7,9 +7,16 @@ libass events, so the live preview and the export animate the same way.
 
 ## Where plugins go
 
-Put `.js` files in `%APPDATA%\com.mazon.halo\plugins`. The **Plugins folder** button in the Animation
-panel opens it. Halo loads every plugin there when it starts. A plugin that fails to load is reported
-and skipped, and Halo starts anyway.
+Put `.js` files in Halo's plugins folder. The **Plugins folder** button in the Animation panel opens it:
+
+| System | Plugins folder |
+| --- | --- |
+| Windows | `%APPDATA%\com.mazon.halo\plugins` |
+| macOS | `~/Library/Application Support/com.mazon.halo/plugins` |
+| Linux | `~/.local/share/com.mazon.halo/plugins` (or `$XDG_DATA_HOME/com.mazon.halo/plugins`) |
+
+Halo loads every plugin there when it starts. A plugin that fails to load is reported and skipped,
+and Halo starts anyway.
 
 A file name may contain letters, digits, `-`, `_` and `.`, and must end in `.js`. A plugin is a single
 file: it can't `import` other files. It gets the helpers it needs from the toolkit (see below).

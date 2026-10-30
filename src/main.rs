@@ -28,7 +28,7 @@ use tower::ServiceExt;
 use tower_http::services::{ServeDir, ServeFile};
 
 use fonts::Fonts;
-use pipeline::{Engine, ExportSettings, Format, Grade, Job, Mode, Quality, Settings, Status, tool};
+use pipeline::{Engine, ExportSettings, Format, Grade, Job, Mode, Quality, Settings, Status};
 use projects::Projects;
 use speech::SpeechModel;
 
@@ -124,7 +124,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             if let Ok(dir) = app.path().resource_dir() {
-                pipeline::use_tools_from(dir);
+                pipeline::use_tools_from(dir, &app.path().app_cache_dir()?.join("bin"));
             }
             let model =app.path().resolve("models/rvm_mobilenetv3_fp32.onnx", BaseDirectory::Resource)?;
             let engine = match Engine::new(&model) {
@@ -182,7 +182,17 @@ fn main() {
             let url = format!("http://{addr}/?token={}", state.token);
             // Only visible when Halo is started from a terminal; handy for debugging the UI in a browser.
             println!("ui: {url}");
+            // A video named on the command line (`halo video.mp4`, or a desktop "Open with")
+            // opens once the page has loaded.
+            let launch_file = std::env::args_os().skip(1).map(PathBuf::from).find(|p| p.is_file());
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
+                .on_page_load(move |window, payload| {
+                    if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                        && let Some(path) = &launch_file
+                    {
+                        open_in_page(&window, path);
+                    }
+                })
                 .title("Halo")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(1024.0, 640.0)
@@ -214,11 +224,29 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("failed to start Halo")
-        .run(|_, event| {
-            if let RunEvent::Exit = event {
+        .run(|_app, event| match event {
+            RunEvent::Exit => {
                 let _ = std::fs::remove_dir_all(work_dir());
             }
+            // A video opened from the Finder ("Open With", or dropped on the Dock icon).
+            #[cfg(target_os = "macos")]
+            RunEvent::Opened { urls } => {
+                let path = urls.iter().find_map(|u| u.to_file_path().ok());
+                if let (Some(window), Some(path)) = (_app.get_webview_window("main"), path) {
+                    open_in_page(&window, &path);
+                }
+            }
+            _ => {}
         });
+}
+
+/// Asks the page to open a video, waiting for the page's code to be ready if it isn't yet.
+fn open_in_page(window: &WebviewWindow, path: &std::path::Path) {
+    let js = format!(
+        "(function open() {{ if (window.halo) window.halo.openPath({}); else setTimeout(open, 100); }})()",
+        json!(path.to_string_lossy())
+    );
+    let _ = window.eval(js);
 }
 
 /// Looks for a newer Halo on GitHub Releases and, if the user agrees, installs it and restarts.
@@ -226,6 +254,11 @@ fn main() {
 #[cfg(not(debug_assertions))]
 async fn check_for_update(app: tauri::AppHandle) {
     use tauri_plugin_updater::UpdaterExt;
+    // On Linux only the AppImage can replace itself; .deb, .rpm and Arch installs update
+    // through their package manager like everything else there.
+    if cfg!(target_os = "linux") && std::env::var_os("APPIMAGE").is_none() {
+        return;
+    }
     let Ok(updater) = app.updater() else { return };
     let Ok(Some(update)) = updater.check().await else { return };
     let window = app.get_webview_window("main");
@@ -738,10 +771,10 @@ async fn plugin_file(State(app): State<App>, Path(name): Path<String>) -> Result
     Ok(([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], text).into_response())
 }
 
-/// Opens the plugins folder in Explorer, making it first if it isn't there yet.
+/// Opens the plugins folder in the file manager, making it first if it isn't there yet.
 async fn open_plugins_folder(State(app): State<App>) -> Result<StatusCode, ApiError> {
     tokio::fs::create_dir_all(&app.plugins).await.map_err(internal)?;
-    tool("explorer").arg(&app.plugins).spawn().map_err(internal)?;
+    tauri_plugin_opener::open_path(&app.plugins, None::<&str>).map_err(internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -792,15 +825,22 @@ struct RevealParams {
     path: String,
 }
 
-/// Opens Explorer with a file selected.
+/// Shows a file in the file manager (Explorer, Finder, or whichever the Linux desktop uses), selected.
 async fn reveal_path(Json(params): Json<RevealParams>) -> Result<StatusCode, ApiError> {
     let path = PathBuf::from(&params.path);
     if !path.is_file() {
         return Err((StatusCode::NOT_FOUND, "That file isn't there any more.".into()));
     }
-    let mut select = std::ffi::OsString::from("/select,");
-    select.push(&path);
-    tool("explorer").arg(select).spawn().map_err(internal)?;
+    reveal(path).await
+}
+
+/// Selects a file in the file manager. On Linux that asks the desktop's file manager over D-Bus,
+/// which can block for a moment, so it runs off the async threads.
+async fn reveal(path: PathBuf) -> Result<StatusCode, ApiError> {
+    tokio::task::spawn_blocking(move || tauri_plugin_opener::reveal_item_in_dir(&path))
+        .await
+        .map_err(internal)?
+        .map_err(internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -830,19 +870,15 @@ fn finished_output(app: &App, id: u64) -> Result<PathBuf, ApiError> {
     Ok(output)
 }
 
-/// Opens Explorer with the exported file selected.
+/// Shows the exported file in the file manager, selected.
 async fn reveal_job(State(app): State<App>, Path(id): Path<u64>) -> Result<StatusCode, ApiError> {
-    let output = finished_output(&app, id)?;
-    let mut select = std::ffi::OsString::from("/select,");
-    select.push(&output);
-    tool("explorer").arg(select).spawn().map_err(internal)?;
-    Ok(StatusCode::NO_CONTENT)
+    reveal(finished_output(&app, id)?).await
 }
 
 /// Opens the exported file in the default video player.
 async fn open_job(State(app): State<App>, Path(id): Path<u64>) -> Result<StatusCode, ApiError> {
     let output = finished_output(&app, id)?;
-    tool("explorer").arg(&output).spawn().map_err(internal)?;
+    tauri_plugin_opener::open_path(&output, None::<&str>).map_err(internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
