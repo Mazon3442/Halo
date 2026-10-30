@@ -25,15 +25,15 @@
 
 | Feature | What it does |
 | --- | --- |
-| **Background blur and removal** | A matting model separates you from the room on every frame. Blur what's behind you, replace it with a solid color, or remove it and export with transparency. |
+| **Background blur and removal** | A matting model separates you from the room on every frame. Blur what's behind you (and darken it), replace it with a solid color, or remove it and export with transparency. Shift and harden the matte's edge, and check it on a matte view. |
 | **Word-timed captions** | Whisper transcribes the speech on your machine, and every word gets its own timing. Pick how many words show at once and how the spoken word stands out. |
 | **20 caption styles** | Pop, Loud, Karaoke, Outline, Box, One word, Glow and more, each one a starting point for font, color, outline, shadow, box and animation. Save your own next to them, and drag any of them onto single captions on the timeline. |
 | **Easy Motion and plugins** | Caption animations come from plugins. The built-in Easy Motion gives each caption an in and an out (direction, style, distance, frames), extras (scale, rotation, 3D tilt, blur, tracking, fade), a hold effect (float, slow push, pulse, swing, shake) and motion blur, with 17 presets. Add your own plugins as .js files. |
-| **Clean up in one pass** | Remove filler words ("um", "uh", "like") across the whole video, fix a misheard name everywhere with find and replace, or import an SRT you already have. |
-| **Color grading** | Graded the way a colorist works: log footage (Apple Log, S-Log3, V-Log, LogC3, Canon Log 3, D-Log) converted first, then grading in log with real white balance, pivoted contrast, shadow/midtone/highlight color wheels that keep skin tones clean, and print film emulation (Kodak 2383 and 2393, Fuji 3513, Vision3, bleach bypass, black and white). 16 looks built from those, previewed on your own frame. Grade the whole video or just a stretch of it, add a .cube LUT or a Lightroom preset, and check the result on a waveform, RGB parade, vectorscope or histogram. |
-| **A real timeline** | Stacked caption tracks, plus color, video and audio tracks with thumbnails, a waveform and snapping. Drag captions in time or between tracks, Alt-drag to copy, copy and paste, trim, split and merge, retime single words, lock and hide tracks, and draw color grades straight onto the track. |
-| **Exports that match the preview** | MP4 (H.264 or H.265, on NVENC when there is one), ProRes or WebM, with captions burned in or saved alongside as SRT. Transparent backgrounds export as ProRes 4444 or WebM with alpha. |
-| **Projects that keep themselves** | Every video gets an autosaved project, so reopening it brings your edits back. Everything is undoable. |
+| **Clean up in one pass** | Remove filler words ("um", "uh", "like") across the whole video, fix a misheard name everywhere with find and replace, shift captions that run early or late, flag captions too fast to read, or import an SRT or WebVTT file you already have. |
+| **Color grading** | Graded the way a colorist works: log footage (Apple Log, S-Log3, V-Log, LogC3, Canon Log 3, D-Log) converted first, then grading in log with real white balance, pivoted contrast, shadow/midtone/highlight color wheels that keep skin tones clean, custom curves, an HSL mixer and print film emulation (Kodak 2383 and 2393, Fuji 3513, Vision3, bleach bypass, black and white). 16 looks built from those, previewed on your own frame. Grade the whole video or just a stretch of it, add a .cube LUT or a Lightroom preset, balance from a picked grey, copy grades between sections, bypass them, and check the result with a split wipe or on a waveform, RGB parade, vectorscope or histogram. |
+| **A real timeline** | Stacked caption tracks, plus color, video and audio tracks with thumbnails, a waveform and snapping. Drag captions in time or between tracks, Alt-drag to copy, copy and paste, trim, split and merge, ripple delete, retime single words, lock and hide tracks, and draw color grades straight onto the track. Markers (which copy out as YouTube chapters) and In and Out points work as they do in Premiere and Resolve. |
+| **Exports that match the preview** | MP4 (H.264 or H.265, on NVENC when there is one), ProRes or WebM, with captions burned in or saved alongside as SRT. Export the whole video or just In to Out. Transparent backgrounds export as ProRes 4444 or WebM with alpha. Save any frame as a full-size PNG. |
+| **Projects that keep themselves** | Every video gets an autosaved project, so reopening it brings your edits back, on the tab and frame you left it at. Everything is undoable. |
 | **Updates itself** | Halo checks for a new release when it starts and offers to install it. |
 
 <table>
@@ -68,22 +68,33 @@ Press **?** in the app for every shortcut.
 Halo reads your video in place and keeps a project per video in `%APPDATA%\com.mazon.halo\projects`, autosaved, so reopening a file brings its edits back. Recent videos are listed on the start screen. Everything is undoable (Ctrl+Z / Ctrl+Shift+Z).
 
 **Background tab:** None, Blur, Remove or Color. Pause anywhere to see the effect on that frame,
-rendered with the exact model and blur the export uses; hold C to compare with the original.
+rendered with the exact model and blur the export uses; hold C to compare with the original. Blur has
+presets (Subtle, Portrait, Strong, Spotlight) and can darken the background too. Under Edges, Shift edge
+pulls the matte in to trim a halo of the room around hair and shoulders (or out to keep more), and
+Hardness tightens soft, see-through edges; Show matte (Alt+M) shows the matte itself, white over black,
+to judge them.
 
 **Captions tab:** the first time, Halo downloads the speech models (Whisper large-v3-turbo, 574 MB, and a 95 MB word aligner) into
 `%APPDATA%\com.mazon.halo\models`. Generate captions to get word-timed lines. Edit text in place
-(Enter moves to the next line), delete lines, and pick how many words each caption shows; lines you
-edit keep exactly what you typed. Captions play live over the video.
+(Enter moves to the next line, Shift+Enter splits a caption at the cursor, Backspace at the start joins
+it to the one before), delete lines, search them, and pick how many words each caption shows; lines you
+edit keep exactly what you typed. Captions play live over the video. Captions on screen too briefly for
+their length (over 20 characters a second, Netflix's limit) are underlined, on the timeline too, and one
+click selects them all.
 
 **Clean up:** remove filler words in one pass ("um", "uh", "like" and friends). Halo finds them all,
 you review the list through the captions, and one undo takes the whole cleanup back out. Find and
 replace (Ctrl+H) fixes a name Whisper misheard everywhere at once, with the match count before you
-replace. Import an SRT file (YouTube, Premiere, anywhere) and it comes in styled like a transcription.
+replace. Shift timing moves the selected captions, or all of them, earlier or later when they run off
+the speech. Import an SRT or WebVTT file (YouTube, Premiere, anywhere) and it comes in styled like a
+transcription.
 
 **Caption style (Captions tab, right panel):** 20 presets, plus any you save from your own edits
 ("Save current as…" puts the edited style next to the built-ins). Then font (bundled or any installed),
-size, case, spacing, colors, how the spoken word stands out, entrance animation, outline, shadow and
-background box. Drag the caption box on the video to place captions, or its corner to resize; safe-zone
+size, case (as spoken, capitals, lowercase or Title Case), spacing, colors, how the spoken word stands
+out, entrance animation, outline, shadow and background box. Hide punctuation for the clean short-form
+look, and bleep swear words (f***) on screen and in caption files. Click any number beside a slider to
+type a value, or drag it sideways. Drag the caption box on the video to place captions, or its corner to resize; safe-zone
 guides show roughly where TikTok, Reels and Shorts put their buttons. Switch to "Selected" to give the
 captions selected on the timeline a style and animation of their own, or drag a style or animation preset
 straight onto captions on the timeline. Select a single caption to color individual words.
@@ -106,28 +117,46 @@ in Resolve. Grades live on the Color track. Drag along an empty stretch of it to
 that length, or double-click it (or press "Add a 5s grade at the playhead") for a five-second one;
 drag a grade or its edges to move it, and split it at the playhead. Each grade takes a look, light and
 color sliders, a print film emulation, three color wheels (shadows, midtones, highlights) with skin
-protection, and optionally a LUT: import a .cube file from Premiere, Resolve, Final Cut or CapCut,
-or a Lightroom preset (.xmp). Save a look you like to use it again. Scopes (Ctrl+Shift+S) show a
-waveform, RGB parade, vectorscope and histogram of the graded frame.
+protection, custom curves (master, red, green and blue, over the frame's histogram), an HSL mixer
+(hue, saturation and luminance per color, like Lightroom's), and optionally a LUT: import a .cube file
+from Premiere, Resolve, Final Cut or CapCut, or a Lightroom preset (.xmp). Pick neutral balances the
+color from something white or grey in the frame. Grade mix fades the whole grade up or down. Save a
+look you like to use it again. Copy a grade (Ctrl+C) and paste it onto another section (Ctrl+V), apply
+it to every section, or take the grade of the section before; double-click a section to name it.
+Ctrl+D bypasses the selected grade and Shift+D all of them, in the preview and the export. W splits the
+picture with a wipe you drag, the original on one side and the grade on the other. Scopes
+(Ctrl+Shift+S) show a waveform, RGB parade, vectorscope and histogram of the graded frame.
 
 **Timeline:** caption, color, video and audio tracks with a ruler and playhead. Caption tracks stack
 like video tracks in Premiere or Resolve: C1 holds the transcript, and captions on C2 and up show at the
 same time, drawn over it. Use them for a hook title over the subtitles, or for two speakers. Drag
 captions to move them, and drag them up or down to change tracks; dropping on the "New track" strip makes
-one. Alt-drag copies. Drag edges to trim, split at the playhead (Ctrl+K), merge (M), add (A, or
+one. Alt-drag copies. Drag edges to trim, split at the playhead (Ctrl+K), merge (Shift+M), add (A, or
 double-click a gap; when the playhead is over a caption, the new one stacks on the next track), delete,
 nudge a frame at a time (Alt+arrows), box-select across tracks, and retime individual words by zooming
-in on a selected caption. Cut, copy and paste with Ctrl+X/C/V (pasting at the playhead), Ctrl+D
+in on a selected caption. Shift+Delete deletes and closes the gap, and Y selects everything from the
+playhead on. Cut, copy and paste with Ctrl+X/C/V (pasting at the playhead), Ctrl+D
 duplicates onto the track above, and right-click a caption or track for more. Each track can be renamed,
-hidden or locked. Snapping (S) catches the playhead and neighbouring captions, and scrubbing the ruler
-stops on edit points. Up and Down jump between edit points; J, K and L shuttle.
+hidden or locked. Snapping (S) catches the playhead, markers and neighbouring captions, and scrubbing
+the ruler stops on edit points. Up and Down jump between edit points; J, K and L shuttle.
+
+**Markers and In / Out:** M drops a marker at the playhead (press it again to name it); drag markers
+along the ruler, right-click to color, name or delete them, and Shift+Up / Shift+Down jump between them.
+"Copy markers as YouTube chapters" puts them on the clipboard as a chapter list for your description. I
+and O set In and Out (Alt+X clears them); looped playback (Ctrl+L) and Play In to Out
+(Ctrl+Shift+Space) stay between them, and the export can render just that stretch.
+
+**Player:** click the timecode to type a time (00:01:30:00, 90s, or +15 frames from here), set the
+volume or mute, show guides (action and title safe, rule of thirds, centre cross), go full screen
+(Shift+F), and save the frame as a full-size PNG with its grade and captions (Shift+E).
 
 **Export (Ctrl+E):** pick the file name and folder (Windows' Save As dialog), format (H.264 or H.265
 MP4, ProRes MOV, WebM), resolution and quality, whether to burn in captions, and whether to save an
 .srt alongside. Transparent backgrounds export as ProRes 4444 or WebM with alpha. "Captions only"
 exports a styled caption overlay with transparency, or the text as SRT or WebVTT. Exports run in the
 background with progress in the top bar, can be cancelled, and are written under a temporary name so
-a failed or cancelled export never replaces an existing file. Audio is kept.
+a failed or cancelled export never replaces an existing file. Audio is kept. With In and Out set, the
+export renders that stretch alone, captions, grades and audio included.
 
 ## How it works
 

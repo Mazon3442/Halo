@@ -130,17 +130,21 @@ export function replaceIndexes(words, indexes, replace) {
   return next;
 }
 
-/** SRT timestamp, HH:MM:SS,mmm (or HH:MM:SS.mmm), to seconds. */
+/**
+ * SRT or WebVTT timestamp to seconds: HH:MM:SS,mmm or HH:MM:SS.mmm, and WebVTT's MM:SS.mmm. Cue
+ * settings after the time ("align:start") are ignored.
+ */
 function parseSrtTime(s) {
-  const m = /^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})$/.exec(s.trim());
+  const m = /^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})[,.](\d{1,3})/.exec(s.trim());
   if (!m) return null;
   const ms = Number(m[4].padEnd(3, "0"));
-  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + ms / 1000;
+  return Number(m[1] ?? 0) * 3600 + Number(m[2]) * 60 + Number(m[3]) + ms / 1000;
 }
 
 /**
- * Brings captions in from an SRT file (YouTube, Premiere, anywhere): one block per caption,
- * timing lines skipped, words spread over the line's span the way live transcription does.
+ * Brings captions in from an SRT or WebVTT file (YouTube, Premiere, anywhere): one block per
+ * caption, timing lines skipped, words spread over the line's span the way live transcription does.
+ * WebVTT's header, notes and inline tags (<i>, <c.yellow>, <00:00:01.000>) are dropped.
  */
 export function parseSrt(text) {
   const words = [];
@@ -153,7 +157,8 @@ export function parseSrt(text) {
     const start = parseSrtTime(startStr);
     const end = parseSrtTime(endStr);
     if (start == null || end == null) continue;
-    const tokens = lines.slice(t + 1).join(" ").split(/\s+/).filter(Boolean);
+    const tokens = lines.slice(t + 1).join(" ").replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+      .split(/\s+/).filter(Boolean);
     const span = Math.max(0.04, end - start);
     const total = tokens.reduce((n, tk) => n + tk.length, 0) || 1;
     let cursor = start;
@@ -294,6 +299,56 @@ export function deleteLines(captions, lines) {
   for (const line of [...lines].sort((a, b) => b.from - a.from)) captions.words.splice(line.from, line.to - line.from);
 }
 
+/**
+ * Deletes lines and closes the time they took on their tracks: later captions on the same track
+ * move earlier by that much, keeping the gaps between them, as a ripple delete does in Premiere.
+ */
+export function rippleDelete(captions, lines) {
+  const { words } = captions;
+  const spans = lines.map((l) => ({ track: trackOf(words[l.from]), start: words[l.from].start, end: words[l.to - 1].end }));
+  deleteLines(captions, lines);
+  for (const w of captions.words) {
+    let shift = 0;
+    for (const s of spans) if (s.track === trackOf(w) && s.end <= w.start + 1e-6) shift += s.end - s.start;
+    if (shift) { w.start -= shift; w.end -= shift; }
+  }
+  sortWords(captions);
+}
+
+/**
+ * Moves lines (every line when `lines` is null) by `delta` seconds, to fix captions that run early
+ * or late against the speech. Never before the start of the video. Returns how far they moved.
+ */
+export function shiftTiming(captions, lines, delta) {
+  const { words } = captions;
+  const ranges = lines ?? [{ from: 0, to: words.length }];
+  const first = Math.min(...ranges.map((l) => words[l.from]?.start ?? Infinity));
+  const d = Math.max(-first, delta);
+  if (!Number.isFinite(d) || !d) return 0;
+  for (const l of ranges) for (let i = l.from; i < l.to; i++) { words[i].start += d; words[i].end += d; }
+  sortWords(captions);
+  return d;
+}
+
+/** The captions from `start` to `end` seconds, retimed to begin at 0, for exporting just that stretch. */
+export function sliceCaptions(captions, start, end) {
+  const words = captions.words
+    .filter((w) => w.end > start && w.start < end)
+    .map((w) => ({ ...w, start: Math.max(0, w.start - start), end: Math.min(end, w.end) - start }));
+  return { ...captions, words };
+}
+
+/** Characters per second a viewer can comfortably read; Netflix's limit for adult English subtitles. */
+export const MAX_CPS = 20;
+/** The shortest a caption should stay up, in seconds. */
+export const MIN_SECS = 0.5;
+
+/** How fast a line reads: its characters (spaces included) over the time it's on screen. */
+export function readingSpeed(text, start, end) {
+  const secs = Math.max(0.01, end - start);
+  return { cps: text.length / secs, secs, fast: text.length / secs > MAX_CPS || (secs < MIN_SECS && text.length > 3) };
+}
+
 /** Adds a new caption line on a track; returns the id of its first word. */
 export function insertLine(captions, start, end, text, track = captions.tracks?.[0]?.id ?? 1) {
   const tokens = text.trim().split(/\s+/).filter(Boolean);
@@ -363,6 +418,47 @@ export function setWordBoundary(captions, i, t) {
   const clamped = Math.min(Math.max(t, a.start + MIN_WORD), b.end - MIN_WORD);
   a.end = clamped;
   b.start = clamped;
+}
+
+/* ---------- how a caption's words are written out ---------- */
+
+// Common English swear words, matched on the word with its punctuation and case stripped. Roots
+// catch their forms (fucking, shitty); whole words are only matched exactly (so "class" is safe).
+const SWEAR_ROOTS = ["fuck", "shit", "bitch", "cunt", "motherf"];
+const SWEAR_WORDS = new Set(["ass", "asshole", "arse", "bastard", "bollocks", "cock", "dick", "dickhead", "goddamn", "piss", "pissed", "prick", "pussy", "slut", "twat", "wanker", "whore", "damn"]);
+
+function isSwear(word) {
+  const w = word.toLowerCase().replace(/[^a-z]/g, "");
+  return w.length > 2 && (SWEAR_WORDS.has(w) || SWEAR_ROOTS.some((r) => w.includes(r)));
+}
+
+/** Keeps a swear word's first letter and stars the rest, leaving its punctuation alone: "f***!". */
+function bleep(text) {
+  let seen = false;
+  return text.replace(/[a-z]/gi, (ch) => (seen ? "*" : ((seen = true), ch)));
+}
+
+function titleCase(text) {
+  return text.toLocaleLowerCase().replace(/(^|[\s\-"“(])(\p{L})/gu, (_, a, b) => a + b.toLocaleUpperCase());
+}
+
+/**
+ * A word as a caption style shows it: its case, without punctuation if the style drops it, and
+ * bleeped if the style censors swearing. Only the display changes; the words stay as they were.
+ */
+export function displayText(text, st) {
+  let t = text;
+  if (st.censor && isSwear(t)) t = bleep(t);
+  if (st.punctuation === "remove") t = t.replace(/[.,!?;:…"“”]+/g, "").replace(/^['‘’]+|['‘’]+$/g, "");
+  if (st.uppercase) t = t.toLocaleUpperCase();
+  else if (st.textCase === "lower") t = t.toLocaleLowerCase();
+  else if (st.textCase === "title") t = titleCase(t);
+  return t;
+}
+
+/** A caption file's text for a line: as spoken, except swearing is bleeped when the style does that. */
+function fileText(words, st) {
+  return words.map((w) => (st.censor && isSwear(w.text) ? bleep(w.text) : w.text)).join(" ");
 }
 
 function assEscape(text) {
@@ -551,7 +647,7 @@ function buildTrack(captions, width, height, { fps = 30, hideLetters = false } =
     const y = Math.round(st.y * H);
     const size = fs(st);
     const ob = outlinePx(st);
-    const display = (w) => assEscape(st.uppercase ? w.text.toLocaleUpperCase() : w.text);
+    const display = (w) => assEscape(displayText(w.text, st));
     // Higher tracks draw over lower ones, each with room for its box, text and gradient bands.
     const layerBase = (ranks.get(trackOf(words[line.from])) ?? 0) * 20;
 
@@ -701,7 +797,7 @@ export function buildSrt(captions) {
     .filter(({ line }) => !hidden.has(trackOf(words[line.from])))
     .sort((a, b) => a.start - b.start)
     .map(({ line, start, end }, k) => {
-      const text = words.slice(line.from, line.to).map((w) => w.text).join(" ");
+      const text = fileText(words.slice(line.from, line.to), lineStyle(captions, words, line));
       return `${k + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${text}\n`;
     })
     .join("\n");

@@ -90,6 +90,10 @@ struct EffectParams {
     mode: String,
     blur: Option<f32>,
     color: Option<String>,
+    /// Matte refinement and background dimming, each optional and 0 when left out.
+    edge: Option<f32>,
+    hardness: Option<f32>,
+    dim: Option<f32>,
 }
 
 impl EffectParams {
@@ -103,7 +107,15 @@ impl EffectParams {
             Some(c) => parse_hex(c).ok_or_else(|| bad_request("color must look like #00b140"))?,
             None => [0, 177, 64],
         };
-        Ok(Settings { mode, blur: blur.clamp(2.0, 80.0), color })
+        let unit = |v: Option<f32>, lo: f32| v.filter(|v| v.is_finite()).unwrap_or(0.0).clamp(lo, 1.0);
+        Ok(Settings {
+            mode,
+            blur: blur.clamp(2.0, 80.0),
+            color,
+            edge: unit(self.edge, -1.0),
+            hardness: unit(self.hardness, 0.0),
+            dim: unit(self.dim, 0.0),
+        })
     }
 }
 
@@ -274,6 +286,7 @@ async fn serve(app: App, web: PathBuf) -> anyhow::Result<std::net::SocketAddr> {
         .route("/plugins/open", post(open_plugins_folder))
         .route("/plugins/{name}", get(plugin_file))
         .route("/files/text", post(save_text))
+        .route("/files/image", post(save_image))
         .route("/reveal", post(reveal_path))
         .route("/fonts", get(list_fonts))
         .route("/fonts/{id}/file", get(font_file))
@@ -358,13 +371,27 @@ struct PreviewParams {
     mode: String,
     blur: Option<f32>,
     color: Option<String>,
+    edge: Option<f32>,
+    hardness: Option<f32>,
+    dim: Option<f32>,
+    /// "matte" shows the matte instead of the result.
+    view: Option<String>,
 }
 
 async fn preview(State(app): State<App>, Path(id): Path<u64>, Query(params): Query<PreviewParams>) -> Result<Response, ApiError> {
     let media = app.media(id)?;
-    let settings = EffectParams { mode: params.mode, blur: params.blur, color: params.color }.settings()?;
+    let matte = params.view.as_deref() == Some("matte");
+    let settings = EffectParams {
+        mode: params.mode,
+        blur: params.blur,
+        color: params.color,
+        edge: params.edge,
+        hardness: params.hardness,
+        dim: params.dim,
+    }
+    .settings()?;
     let at = if params.t.is_finite() { params.t.max(0.0) } else { 0.0 };
-    let preview = tokio::task::spawn_blocking(move || app.engine.preview(&media.path, at, settings))
+    let preview = tokio::task::spawn_blocking(move || app.engine.preview(&media.path, at, settings, matte))
         .await
         .map_err(internal)?
         .map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, format!("{e:#}")))?;
@@ -442,6 +469,7 @@ struct SaveDialogParams {
     file_name: String,
     extension: String,
     directory: Option<String>,
+    title: Option<String>,
 }
 
 /// Shows the native "save as" dialog for an export.
@@ -449,7 +477,7 @@ async fn dialog_save(State(app): State<App>, Json(params): Json<SaveDialogParams
     let ext = params.extension.clone();
     let path = tokio::task::spawn_blocking(move || {
         let mut dialog = rfd::FileDialog::new()
-            .set_title("Export video")
+            .set_title(params.title.as_deref().unwrap_or("Export video"))
             .set_file_name(&params.file_name)
             .add_filter(ext.to_uppercase(), &[ext.as_str()]);
         if let Some(dir) = params.directory.filter(|d| std::path::Path::new(d).is_dir()) {
@@ -556,6 +584,9 @@ struct JobParams {
     format: String,
     quality: String,
     max_side: Option<usize>,
+    /// Export only from `range_start` to `range_end` seconds (the In and Out points).
+    range_start: Option<f64>,
+    range_end: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -625,6 +656,11 @@ async fn create_job(State(app): State<App>, Json(params): Json<JobParams>) -> Re
         .unwrap()
         .insert(id, JobRecord { status: status.clone(), cancel: cancel.clone(), output: output.clone() });
     let export = ExportSettings { format, quality, max_side: params.max_side.filter(|&s| s >= 240) };
+    let range = match (params.range_start, params.range_end) {
+        (Some(start), Some(end)) if start.is_finite() && end.is_finite() && end - start >= 0.05 => Some((start.max(0.0), end)),
+        (None, None) => None,
+        _ => return Err(bad_request("the export range has no length")),
+    };
     app.queue
         .send(Job {
             input: media.path.clone(),
@@ -634,6 +670,7 @@ async fn create_job(State(app): State<App>, Json(params): Json<JobParams>) -> Re
             srt: params.srt,
             grades,
             captions_only: params.captions_only,
+            range,
             settings,
             export,
             status,
@@ -726,6 +763,26 @@ async fn save_text(Json(params): Json<SaveTextParams>) -> Result<StatusCode, Api
         return Err((StatusCode::CONFLICT, "A file with that name already exists.".into()));
     }
     tokio::fs::write(&path, params.text).await.map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct SaveImageParams {
+    path: String,
+}
+
+/// Saves a still of the frame (a PNG the page drew) where the user chose in the Save As dialog,
+/// which has already asked about replacing a file that's there.
+async fn save_image(Query(params): Query<SaveImageParams>, body: axum::body::Bytes) -> Result<StatusCode, ApiError> {
+    let path = PathBuf::from(&params.path);
+    let png = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("png"));
+    if !png || !path.is_absolute() || !path.parent().is_some_and(|d| d.is_dir()) {
+        return Err(bad_request("Choose where to save the image."));
+    }
+    if !body.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(bad_request("That isn't a PNG image."));
+    }
+    tokio::fs::write(&path, &body).await.map_err(internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

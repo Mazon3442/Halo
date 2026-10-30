@@ -8,7 +8,7 @@
 import { api } from "./api.js";
 import {
   MIN_WORD, copyLines, deleteLines, editLine, groupLines, insertLine, lineStyle, lineTimes, lockLine, mergeLines,
-  moveLines, nextTrackId, pasteLines, retimeLine, setWordBoundary, shiftTracks, splitLine, trackOf,
+  moveLines, nextTrackId, pasteLines, readingSpeed, retimeLine, rippleDelete, setWordBoundary, shiftTracks, splitLine, trackOf,
 } from "./captions.js";
 import { freeSpan } from "./grade.js";
 import { phaseLengths, resolveMotion } from "./motion.js";
@@ -24,6 +24,17 @@ const MIN_GRADE_SECS = 0.2;
 /** Where Top, Middle and Bottom put a caption, as the height of its baseline. */
 const PLACES = { top: 0.24, middle: 0.56, bottom: 0.8 };
 const TICK_STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800];
+/** Marker colours, as in Resolve's marker menu. */
+export const MARKER_COLORS = { blue: "#5aa9ff", green: "#5fd38d", yellow: "#ffd43b", red: "#ff6b6b", purple: "#b18cff", orange: "#ff9f43" };
+
+/** A time as YouTube writes chapter times: m:ss, or h:mm:ss past an hour. */
+function chapterTime(t) {
+  const s = Math.floor(t);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor(s / 60) % 60;
+  const sec = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
 
 /** Keeps a drag going when the pointer leaves the element. */
 function capture(el, pointerId) {
@@ -71,6 +82,12 @@ export class Timeline {
     this.onGradeSplit = null;
     this.onGradeDelete = null;
     this.onGradeReset = null;
+    this.onGradeBypass = null;
+    this.onGradeCopy = null;
+    this.onGradePaste = null;
+    this.onGradeRename = null;
+    this.onGradeMatchPrevious = null;
+    this.hasGradeClipboard = () => false;
     /** Set by the app to make the toolbar's Split button context-aware. */
     this.onSplitRequest = null;
     this.grades = $("tl-grades");
@@ -84,6 +101,8 @@ export class Timeline {
     this.heads = $("tl-caption-heads");
     this.newTrackRow = $("tl-new-track");
     this.playhead = $("tl-playhead");
+    this.markerLayer = $("tl-markers");
+    this.rangeBand = $("tl-range");
     this.canvases = { ruler: $("tl-ruler"), video: $("tl-video"), audio: $("tl-audio") };
     this.#bind();
     new ResizeObserver(() => {
@@ -355,6 +374,7 @@ export class Timeline {
 
   renderBlocks() {
     this.renderGrades();
+    this.#renderMarkers();
     const cap = this.#captions;
     this.#renderTracks();
     for (const row of this.#rows.values()) row.replaceChildren();
@@ -380,6 +400,11 @@ export class Timeline {
       const selected = this.selection.has(id);
       el.classList.toggle("selected", selected);
       el.title = words.slice(line.from, line.to).map((w) => w.text).join(" ");
+      const speed = readingSpeed(el.title, start, end);
+      if (speed.fast) {
+        el.classList.add("fast");
+        el.title += ` · ${Math.round(speed.cps)} characters a second, faster than most people read`;
+      }
       const group = words[line.from].group;
       const own = group != null ? cap.overrides?.[group] : null;
       const placed = own?.y;
@@ -525,6 +550,40 @@ export class Timeline {
     this.#commit((c) => deleteLines(c, lines));
     this.clearSelection();
     this.toast(lines.length === 1 ? "Caption deleted" : `${lines.length} captions deleted`, { action: "Undo", onAction: () => this.store.undo() });
+  }
+
+  /** Deletes the selected captions and closes the gaps they leave on their tracks (Shift+Delete). */
+  rippleDeleteSelected() {
+    const lines = this.#selectedLines();
+    if (!lines.length) return;
+    this.#commit((c) => rippleDelete(c, lines));
+    this.clearSelection();
+    this.toast(`${lines.length === 1 ? "Caption" : `${lines.length} captions`} deleted, and the later ones moved up to close the gap.`, { action: "Undo", onAction: () => this.store.undo() });
+  }
+
+  /** Selects every caption from the playhead on, across tracks that aren't locked, like Resolve's Y. */
+  selectForward() {
+    const words = this.#captions?.words ?? [];
+    const t = this.video.currentTime;
+    const ids = this.#lines
+      .filter((l) => words[l.to - 1].end > t + 1e-3 && !this.#isLocked(trackOf(words[l.from])))
+      .map((l) => words[l.from].id);
+    this.select(ids);
+    this.toast(ids.length ? `Selected ${ids.length} caption${ids.length === 1 ? "" : "s"} from the playhead on.` : "No captions after the playhead.");
+  }
+
+  /** Selects the captions with these first-word ids, and shows the first of them. */
+  reveal(ids) {
+    this.select(ids);
+    const words = this.#captions.words;
+    const first = this.#lines.find((l) => ids.includes(words[l.from].id));
+    if (first) this.#scrollTo(words[first.from].start);
+  }
+
+  #scrollTo(t) {
+    const x = t * this.px;
+    const left = this.scroll.scrollLeft;
+    if (x < left || x > left + this.#viewWidth - 40) this.scroll.scrollLeft = Math.max(0, x - this.#viewWidth / 3);
   }
 
   /**
@@ -731,7 +790,7 @@ export class Timeline {
   /** Times a dragged edge may snap to: the playhead, other captions' edges, and the ends. */
   #snapTargets(excludeFroms) {
     const words = this.#captions.words;
-    const targets = [0, this.#duration, this.video.currentTime];
+    const targets = [0, this.#duration, this.video.currentTime, ...this.#markTimes()];
     for (const l of this.#lines) {
       if (excludeFroms.has(l.from)) continue;
       targets.push(words[l.from].start, words[l.to - 1].end);
@@ -764,7 +823,7 @@ export class Timeline {
     if (!this.snapping) return t;
     let best = t;
     let dist = SNAP_PX / this.px;
-    for (const p of this.#editPoints()) {
+    for (const p of [...this.#editPoints(), ...this.#markTimes()]) {
       if (Math.abs(p - t) < dist) { best = p; dist = Math.abs(p - t); }
     }
     return best;
@@ -828,9 +887,28 @@ export class Timeline {
 
     // Scrub by dragging on the ruler (catching edit points while snapping), or click the video
     // and audio tracks to jump.
+    this.markerLayer.addEventListener("dblclick", (ev) => {
+      const el = ev.target.closest(".tl-marker");
+      if (el) { ev.stopPropagation(); this.renameMarker(Number(el.dataset.id)); }
+    });
+    $("tl-ruler-row").addEventListener("contextmenu", (ev) => {
+      if (this.#markerContext(ev)) return;
+      ev.preventDefault();
+      const t = this.#timeAt(ev.clientX);
+      const r = this.#range;
+      this.openMenu(ev.clientX, ev.clientY, [
+        { label: "Add marker here", icon: "#i-marker", hint: "M", action: () => this.addMarker(t) },
+        { label: "Set In here", icon: "#i-in", hint: "I", action: () => this.setRange("in", t) },
+        { label: "Set Out here", icon: "#i-out", hint: "O", action: () => this.setRange("out", t) },
+        { label: "Clear In and Out", icon: "#i-x", hint: "Alt+X", disabled: !r, action: () => this.clearRange() },
+        { sep: true },
+        { label: "Copy markers as YouTube chapters", icon: "#i-copy", disabled: !this.#markers.length, action: () => this.copyChapters() },
+      ]);
+    });
     for (const id of ["tl-ruler-row", "tl-video-row", "tl-audio-row"]) {
       $(id).addEventListener("pointerdown", (ev) => {
         if (ev.button !== 0) return;
+        if (id === "tl-ruler-row" && this.#markerDown(ev)) return;
         const el = ev.currentTarget;
         capture(el, ev.pointerId);
         this.video.pause();
@@ -846,16 +924,21 @@ export class Timeline {
     this.tracksBox.addEventListener("contextmenu", (ev) => this.#captionContext(ev));
     this.grades.addEventListener("pointerdown", (ev) => this.#gradeDown(ev));
     this.grades.addEventListener("contextmenu", (ev) => this.#gradeContext(ev));
+    // Pointer capture during the clicks retargets the double-click to the track itself, so the
+    // block is found from where the pointer is.
+    const under = (ev, selector) => document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.(selector) ?? null;
     this.grades.addEventListener("dblclick", (ev) => {
-      if (!ev.target.closest(".tl-grade")) this.onGradeAdd?.(this.#timeAt(ev.clientX), null);
+      const block = under(ev, ".tl-grade");
+      if (!block) this.onGradeAdd?.(this.#timeAt(ev.clientX), null);
+      else this.renameGrade(Number(block.dataset.id));
     });
     document.addEventListener("pointerdown", (ev) => {
-      if (!$("context-menu").hidden && !ev.target.closest("#context-menu")) this.#closeMenu();
+      if (!$("context-menu").hidden && !ev.target.closest("#context-menu")) this.closeMenu();
     }, true);
-    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") this.#closeMenu(); });
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") this.closeMenu(); });
     this.tracksBox.addEventListener("dblclick", (ev) => {
-      const clip = ev.target.closest(".tl-clip");
-      const row = ev.target.closest(".tl-row.captions");
+      const clip = under(ev, ".tl-clip");
+      const row = under(ev, ".tl-row.captions");
       if (clip) this.editText(Number(clip.dataset.k));
       else if (row) this.addAt(this.#timeAt(ev.clientX), Number(row.dataset.track));
     });
@@ -1137,7 +1220,7 @@ export class Timeline {
     const clip = ev.target.closest(".tl-clip");
     const locked = this.#isLocked(track);
     if (!clip) {
-      this.#openMenu(ev.clientX, ev.clientY, [
+      this.openMenu(ev.clientX, ev.clientY, [
         { label: "Paste here", icon: "#i-paste", disabled: !this.#clipboard || locked, action: () => this.paste(t, track) },
         { label: "Add a caption here", icon: "#i-plus", disabled: locked, action: () => this.addAt(t, track) },
         { sep: true },
@@ -1154,7 +1237,7 @@ export class Timeline {
     const own = lines.some((l) => words[l.from].group != null && this.#captions.overrides?.[words[l.from].group]);
     const tPlay = this.video.currentTime;
     const splittable = lines.some((l) => tPlay > words[l.from].start && tPlay < words[l.to - 1].end && l.to - l.from > 1);
-    this.#openMenu(ev.clientX, ev.clientY, locked ? [
+    this.openMenu(ev.clientX, ev.clientY, locked ? [
       { label: "Unlock this track", icon: "#i-unlock", action: () => this.setTrack(track, { locked: false }) },
     ] : [
       { label: "Edit text", icon: "#i-type", disabled: n !== 1, action: () => this.editText(this.#lines.indexOf(lines[0])) },
@@ -1165,12 +1248,13 @@ export class Timeline {
       { label: "Duplicate onto the track above", icon: "#i-layers", hint: "Ctrl+D", action: () => this.duplicateSelected() },
       { sep: true },
       { label: "Split at playhead", icon: "#i-scissors", hint: "Ctrl+K", disabled: !splittable, action: () => this.splitAtPlayhead() },
-      { label: "Merge", icon: "#i-merge", hint: "M", disabled: n < 2, action: () => this.mergeSelected() },
+      { label: "Merge", icon: "#i-merge", hint: "Shift+M", disabled: n < 2, action: () => this.mergeSelected() },
       { label: "Show at the top", icon: "#i-arrow-up", disabled: !n, action: () => this.place("top") },
       { label: "Show at the bottom", icon: "#i-arrow-down", disabled: !n, action: () => this.place("bottom") },
       { label: "Reset to the overall style", icon: "#i-undo", disabled: !own, action: () => this.#resetStyle(lines) },
       { sep: true },
       { label: n === 1 ? "Delete caption" : `Delete ${n} captions`, icon: "#i-trash", hint: "Del", danger: true, action: () => this.deleteSelected() },
+      { label: "Ripple delete", icon: "#i-trash", hint: "Shift+Del", danger: true, action: () => this.rippleDeleteSelected() },
     ]);
   }
 
@@ -1188,7 +1272,7 @@ export class Timeline {
     const t = this.#trackById(id);
     if (!t) return;
     const words = this.#captions.words;
-    this.#openMenu(ev.clientX, ev.clientY, [
+    this.openMenu(ev.clientX, ev.clientY, [
       { label: "Rename", icon: "#i-type", action: () => this.#renameTrack(id, this.heads.querySelector(`.tl-head[data-track="${id}"] .tl-track-name`)) },
       { label: t.hidden ? "Show" : "Hide", icon: t.hidden ? "#i-eye" : "#i-eye-off", action: () => this.setTrack(id, { hidden: !t.hidden }) },
       { label: t.locked ? "Unlock" : "Lock", icon: t.locked ? "#i-unlock" : "#i-lock", action: () => this.setTrack(id, { locked: !t.locked }) },
@@ -1197,6 +1281,206 @@ export class Timeline {
       { label: "Add a track", icon: "#i-layers", action: () => this.addTrack() },
       { label: "Delete track", icon: "#i-trash", danger: true, disabled: this.#tracks().length < 2, action: () => this.deleteTrack(id) },
     ]);
+  }
+
+  /* ---------- markers and In / Out ---------- */
+
+  get #markers() { return this.store.doc?.markers ?? []; }
+  get #range() { return this.store.doc?.range ?? null; }
+
+  /** Marker times and the In and Out points, for snapping to. */
+  #markTimes() {
+    const r = this.#range;
+    return [...this.#markers.map((m) => m.t), ...(r ? [r.in, r.out].filter((v) => v != null) : [])];
+  }
+
+  /** Adds a marker at `t`, or opens the one already on that frame for naming, as pressing M twice does in Premiere. */
+  addMarker(t = this.video.currentTime) {
+    const frame = 0.5 / this.#fps;
+    const there = this.#markers.find((m) => Math.abs(m.t - t) < frame);
+    if (there) return this.renameMarker(there.id);
+    let id;
+    this.store.update((d) => {
+      d.markers ??= [];
+      id = Math.max(0, ...d.markers.map((m) => m.id)) + 1;
+      d.markers.push({ id, t, name: "", color: this.lastMarkerColor ?? "blue" });
+      d.markers.sort((a, b) => a.t - b.t);
+    });
+    return id;
+  }
+
+  /** The marker before or after the playhead, for Shift+Up and Shift+Down. */
+  markerStep(dir) {
+    const t = this.video.currentTime;
+    const times = this.#markers.map((m) => m.t);
+    const found = dir > 0 ? times.find((m) => m > t + 1e-3) : times.reverse().find((m) => m < t - 1e-3);
+    return found ?? null;
+  }
+
+  setMarker(id, patch) {
+    this.store.update((d) => {
+      const m = d.markers?.find((x) => x.id === id);
+      if (m) Object.assign(m, patch);
+      d.markers?.sort((a, b) => a.t - b.t);
+    });
+  }
+
+  deleteMarker(id) {
+    this.store.update((d) => { d.markers = (d.markers ?? []).filter((m) => m.id !== id); });
+  }
+
+  renameMarker(id) {
+    const el = this.markerLayer.querySelector(`.tl-marker[data-id="${id}"]`);
+    const m = this.#markers.find((x) => x.id === id);
+    if (!el || !m) return;
+    const input = document.createElement("input");
+    input.className = "tl-marker-input";
+    input.value = m.name;
+    input.placeholder = "Marker name";
+    input.maxLength = 80;
+    input.setAttribute("aria-label", "Marker name");
+    el.append(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      input.remove();
+      if (save && input.value.trim() !== m.name) this.setMarker(id, { name: input.value.trim() });
+    };
+    input.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Enter") finish(true);
+      if (ev.key === "Escape") finish(false);
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  }
+
+  /** The markers as YouTube chapters: "0:00 Intro" lines, starting at 0:00 as YouTube requires. */
+  chapters() {
+    const marks = this.#markers.filter((m) => m.t < this.#duration);
+    const rows = marks.map((m, i) => `${chapterTime(m.t)} ${m.name || `Chapter ${i + 1}`}`);
+    if (!marks.length || marks[0].t >= 1) rows.unshift("0:00 Intro");
+    return rows.join("\n");
+  }
+
+  /** Sets the In or Out point (null clears it), keeping In before Out. */
+  setRange(which, t) {
+    this.store.update((d) => {
+      const r = { in: d.range?.in ?? null, out: d.range?.out ?? null, [which]: t };
+      if (r.in != null && r.out != null && r.out - r.in < 1 / this.#fps) {
+        // Setting one past the other moves the other out of the way, as in Premiere.
+        if (which === "in") r.out = null; else r.in = null;
+      }
+      d.range = r.in == null && r.out == null ? null : r;
+    });
+  }
+
+  clearRange() {
+    if (this.#range) this.store.update((d) => { d.range = null; });
+  }
+
+  #renderMarkers() {
+    const layer = this.markerLayer;
+    layer.replaceChildren();
+    const r = this.#range;
+    this.rangeBand.hidden = !r || !this.#media;
+    if (r && this.#media) {
+      const a = r.in ?? 0;
+      const b = r.out ?? this.#duration;
+      this.rangeBand.style.left = `${a * this.px}px`;
+      this.rangeBand.style.width = `${Math.max(1, (b - a) * this.px)}px`;
+      this.rangeBand.classList.toggle("has-in", r.in != null);
+      this.rangeBand.classList.toggle("has-out", r.out != null);
+      this.rangeBand.title = `In ${r.in != null ? chapterTime(r.in) : "start"} to Out ${r.out != null ? chapterTime(r.out) : "end"}. Exports and looped playback use this range.`;
+    }
+    if (!this.#media) return;
+    for (const m of this.#markers) {
+      const el = document.createElement("div");
+      el.className = "tl-marker";
+      el.dataset.id = m.id;
+      el.style.left = `${m.t * this.px}px`;
+      el.style.setProperty("--mk", MARKER_COLORS[m.color] ?? MARKER_COLORS.blue);
+      el.title = `${m.name || "Marker"} · ${chapterTime(m.t)}. Click to jump, drag to move, double-click to name, right-click for more.`;
+      if (m.name) {
+        const label = document.createElement("span");
+        label.className = "tl-marker-name";
+        label.textContent = m.name;
+        el.append(label);
+      }
+      layer.append(el);
+    }
+  }
+
+  #markerDown(ev) {
+    const el = ev.target.closest(".tl-marker");
+    if (!el || ev.button !== 0) return false;
+    ev.stopPropagation();
+    const id = Number(el.dataset.id);
+    const m = this.#markers.find((x) => x.id === id);
+    if (!m) return true;
+    capture(el, ev.pointerId);
+    const startX = ev.clientX;
+    let t = m.t;
+    let moved = false;
+    const targets = [0, this.#duration, this.video.currentTime, ...this.#editPoints()];
+    const move = (e) => {
+      if (!moved && Math.abs(e.clientX - startX) < DRAG_THRESHOLD_PX) return;
+      moved = true;
+      const raw = Math.min(this.#duration, Math.max(0, m.t + (e.clientX - startX) / this.px));
+      const snap = this.#snapOffset([raw], targets);
+      t = raw + snap.offset;
+      this.#showSnap(snap.at);
+      el.style.left = `${t * this.px}px`;
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      this.#showSnap(null);
+      if (moved) this.setMarker(id, { t });
+      else { this.video.pause(); this.onSeek(m.t); }
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up, { once: true });
+    el.addEventListener("pointercancel", up, { once: true });
+    return true;
+  }
+
+  #markerContext(ev) {
+    const el = ev.target.closest(".tl-marker");
+    if (!el) return false;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const id = Number(el.dataset.id);
+    const m = this.#markers.find((x) => x.id === id);
+    if (!m) return true;
+    this.openMenu(ev.clientX, ev.clientY, [
+      { label: "Name…", icon: "#i-type", action: () => this.renameMarker(id) },
+      ...Object.entries(MARKER_COLORS).map(([color, hex]) => ({
+        label: color[0].toUpperCase() + color.slice(1), swatch: hex, checked: m.color === color,
+        action: () => { this.lastMarkerColor = color; this.setMarker(id, { color }); },
+      })),
+      { sep: true },
+      { label: "Copy markers as YouTube chapters", icon: "#i-copy", action: () => this.copyChapters() },
+      { sep: true },
+      { label: "Delete marker", icon: "#i-trash", danger: true, action: () => this.deleteMarker(id) },
+      { label: "Delete all markers", icon: "#i-trash", danger: true, disabled: this.#markers.length < 2, action: () => {
+        this.store.update((d) => { d.markers = []; });
+        this.toast("Markers deleted", { action: "Undo", onAction: () => this.store.undo() });
+      } },
+    ]);
+    return true;
+  }
+
+  async copyChapters() {
+    const text = this.chapters();
+    try {
+      await navigator.clipboard.writeText(text);
+      this.toast("Chapters copied. Paste them into your YouTube description.");
+    } catch {
+      this.toast("Couldn't copy to the clipboard.");
+    }
   }
 
   /* ---------- graded sections ---------- */
@@ -1214,10 +1498,11 @@ export class Timeline {
       el.style.left = `${s.start * this.px}px`;
       el.style.width = `${Math.max(2, (s.end - s.start) * this.px)}px`;
       el.classList.toggle("selected", s.id === this.gradeSelection);
+      el.classList.toggle("bypassed", !!s.bypass);
       const name = document.createElement("span");
       name.className = "tl-clip-text";
       name.textContent = s.name || "Graded";
-      el.title = `${s.name || "Graded"}. Drag to move, drag an edge to change where it starts or ends.`;
+      el.title = `${s.name || "Graded"}${s.bypass ? " (bypassed)" : ""}. Drag to move, drag an edge to change where it starts or ends, double-click to rename.`;
       el.append(name);
       const remove = document.createElement("button");
       remove.className = "tl-remove";
@@ -1239,6 +1524,35 @@ export class Timeline {
       }
       this.grades.append(el);
     }
+  }
+
+  /** Inline renaming on a graded section's block. */
+  renameGrade(id) {
+    const el = this.grades.querySelector(`.tl-grade[data-id="${id}"]`);
+    const s = this.#sections.find((x) => x.id === id);
+    if (!el || !s) return;
+    const input = document.createElement("input");
+    input.className = "tl-clip-input";
+    input.value = s.name || "Graded";
+    input.maxLength = 40;
+    input.setAttribute("aria-label", "Section name");
+    el.replaceChildren(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      if (save && input.value.trim() && input.value.trim() !== s.name) this.onGradeRename?.(id, input.value);
+      else this.renderGrades();
+    };
+    input.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Enter") finish(true);
+      if (ev.key === "Escape") finish(false);
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   }
 
   selectGrade(id) {
@@ -1352,15 +1666,21 @@ export class Timeline {
     if (underCursor && this.gradeSelection !== underCursor.id) this.selectGrade(underCursor.id);
     const selected = this.#sections.find((s) => s.id === this.gradeSelection) ?? underCursor ?? null;
     const splittable = this.#sections.some((s) => this.video.currentTime > s.start + 0.1 && this.video.currentTime < s.end - 0.1);
-    this.#openMenu(ev.clientX, ev.clientY, [
-      { label: "Split at playhead", icon: "#i-scissors", disabled: !splittable, action: () => this.onGradeSplit?.() },
+    this.openMenu(ev.clientX, ev.clientY, [
+      { label: "Rename", icon: "#i-type", disabled: !selected, action: () => this.renameGrade(selected.id) },
+      { label: selected?.bypass ? "Turn grade on" : "Bypass grade", icon: "#i-power", hint: "Ctrl+D", disabled: !selected, action: () => this.onGradeBypass?.(selected.id) },
       { sep: true },
-      { label: "Remove grade", icon: "#i-trash", danger: true, disabled: !selected, action: () => this.onGradeDelete?.(selected.id) },
+      { label: "Copy grade", icon: "#i-copy", hint: "Ctrl+C", disabled: !selected, action: () => this.onGradeCopy?.(selected.id) },
+      { label: "Paste grade", icon: "#i-paste", hint: "Ctrl+V", disabled: !selected || !this.hasGradeClipboard(), action: () => this.onGradePaste?.(selected.id) },
+      { label: "Use the grade before this one", icon: "#i-prev", disabled: !selected || this.#sections[0]?.id === selected.id, action: () => this.onGradeMatchPrevious?.(selected.id) },
+      { sep: true },
+      { label: "Split at playhead", icon: "#i-scissors", hint: "Ctrl+K", disabled: !splittable, action: () => this.onGradeSplit?.() },
       { label: "Reset look", icon: "#i-undo", disabled: !selected, action: () => this.onGradeReset?.(selected.id) },
+      { label: "Remove grade", icon: "#i-trash", hint: "Del", danger: true, disabled: !selected, action: () => this.onGradeDelete?.(selected.id) },
     ]);
   }
 
-  #openMenu(x, y, items) {
+  openMenu(x, y, items) {
     const menu = $("context-menu");
     menu.replaceChildren();
     for (const it of items) {
@@ -1374,6 +1694,10 @@ export class Timeline {
       b.className = `menu-item${it.danger ? " danger" : ""}`;
       b.setAttribute("role", "menuitem");
       if (it.icon) b.innerHTML = `<svg class="icon"><use href="${it.icon}"/></svg>`;
+      else if (it.swatch) b.innerHTML = `<span class="menu-swatch" style="background:${it.swatch}"></span>`;
+      else if (it.checked != null) b.innerHTML = `<span class="menu-check">${it.checked ? "✓" : ""}</span>`;
+      if (it.checked != null) b.setAttribute("aria-checked", String(!!it.checked));
+      if (it.checked != null) b.setAttribute("role", "menuitemcheckbox");
       b.append(document.createTextNode(it.label));
       if (it.hint) {
         const hint = document.createElement("span");
@@ -1382,7 +1706,7 @@ export class Timeline {
         b.append(hint);
       }
       b.disabled = !!it.disabled;
-      if (!it.disabled) b.addEventListener("click", () => { this.#closeMenu(); it.action(); });
+      if (!it.disabled) b.addEventListener("click", () => { this.closeMenu(); it.action(); });
       menu.append(b);
     }
     menu.hidden = false;
@@ -1391,7 +1715,7 @@ export class Timeline {
     menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 4))}px`;
   }
 
-  #closeMenu() {
+  closeMenu() {
     $("context-menu").hidden = true;
   }
 

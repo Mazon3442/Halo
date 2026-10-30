@@ -4,7 +4,8 @@
 // straight onto captions on the timeline.
 
 import { api } from "./api.js";
-import { groupLines, lineTimes, lineStyle, lockLine, readableOn } from "./captions.js";
+import { displayText, groupLines, lineTimes, lineStyle, lockLine, readableOn } from "./captions.js";
+import { editableValue } from "./scrub.js";
 import { GLOBAL_ONLY, PRESETS, animation, lookOf, normalizeStyle, presetStyle } from "./styles.js";
 import { getPlugin, listPlugins, onPluginsChanged, pluginParams } from "./plugins/registry.js";
 import { makeDraggable } from "./dragdrop.js";
@@ -232,7 +233,7 @@ export function createInspector({ store, timeline, video, toast }) {
   function styleSample(st) {
     pageFont(st.font);
     const el = document.createElement("span");
-    const [first, second] = st.uppercase ? ["SO", "GOOD"] : ["So", "good"];
+    const [first, second] = ["So", "good"].map((w) => displayText(w, st));
     const word = document.createElement("span");
     word.textContent = second;
     el.append(`${first} `, word);
@@ -307,7 +308,10 @@ export function createInspector({ store, timeline, video, toast }) {
     const st = shownStyle();
     if (![...$("st-font").options].some((o) => o.value === st.font)) $("st-font").append(new Option(st.font, st.font));
     $("st-font").value = st.font;
-    for (const r of document.querySelectorAll("input[name=st-case]")) r.checked = (r.value === "up") === st.uppercase;
+    const textCase = st.uppercase ? "up" : st.textCase ?? "as";
+    for (const r of document.querySelectorAll("input[name=st-case]")) r.checked = r.value === textCase;
+    $("st-punct").checked = st.punctuation === "remove";
+    $("st-censor").checked = !!st.censor;
     // Shown as a percent of the text size, the same scale as tracking/100 in Premiere or CapCut.
     const spacing = Math.round(st.spacing * 200) / 2;
     $("st-spacing").value = spacing;
@@ -375,7 +379,16 @@ export function createInspector({ store, timeline, video, toast }) {
     r.addEventListener("change", () => { scope = r.value; selectedWord = null; render(); });
   }
   $("st-font").addEventListener("change", () => set("font", $("st-font").value));
-  for (const r of document.querySelectorAll("input[name=st-case]")) r.addEventListener("change", () => set("uppercase", r.value === "up"));
+  for (const r of document.querySelectorAll("input[name=st-case]")) {
+    r.addEventListener("change", () => {
+      set("uppercase", r.value === "up", "style-case");
+      if (r.value !== "up") set("textCase", r.value, "style-case");
+    });
+  }
+  $("st-punct").addEventListener("change", () => set("punctuation", $("st-punct").checked ? "remove" : "keep"));
+  $("st-censor").addEventListener("change", () => set("censor", $("st-censor").checked));
+  editableValue($("st-size-v"), $("st-size"), { toRange: (v) => v * 10 });
+  editableValue($("st-spacing-v"), $("st-spacing"));
   $("st-spacing").addEventListener("input", () => set("spacing", Number($("st-spacing").value) / 100));
   $("st-spacing").addEventListener("dblclick", () => set("spacing", 0));
   $("st-gradient").addEventListener("change", () => set("gradient", $("st-gradient").value));
@@ -756,8 +769,7 @@ export function createInspector({ store, timeline, video, toast }) {
     const st = shownStyle();
     const cap = doc.captions;
     const line = referenceLine();
-    let text = line ? cap.words.slice(line.from, line.to).map((w) => w.text).join(" ") : "Caption";
-    if (cap.style.uppercase) text = text.toLocaleUpperCase();
+    const text = line ? cap.words.slice(line.from, line.to).map((w) => displayText(w.text, st)).join(" ") : displayText("Caption", st);
     const cw = screen.clientWidth;
     const ch = screen.clientHeight;
     const fontPx = st.size * Math.min(cw, ch);

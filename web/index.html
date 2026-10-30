@@ -47,6 +47,18 @@
   <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></symbol>
   <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
   <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="m19 12-7 7-7-7"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-pipette" viewBox="0 0 24 24"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4z"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></symbol>
+  <symbol id="i-wipe" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/><path d="M3 4h9v16H5a2 2 0 0 1-2-2z" fill="currentColor" opacity=".35"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></symbol>
+  <symbol id="i-loop" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="i-maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+  <symbol id="i-marker" viewBox="0 0 24 24"><path d="M6 3h12v13l-6 5-6-5z"/></symbol>
+  <symbol id="i-in" viewBox="0 0 24 24"><path d="M8 4H5v16h3"/><path d="M12 12h8"/><path d="m16 8 4 4-4 4"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M16 4h3v16h-3"/><path d="M12 12H4"/><path d="m8 8-4 4 4 4"/></symbol>
 </svg>
 
 <div class="app">
@@ -106,8 +118,14 @@
           <p class="hint" id="mode-hint"></p>
         </div>
         <div class="group" id="blur-group">
-          <div class="group-title"><label for="blur">Strength</label><span class="value" id="blur-value"></span></div>
-          <input type="range" id="blur" min="4" max="60" step="1">
+          <div class="slider-row"><label for="blur">Strength</label><input type="range" id="blur" min="4" max="60" step="1"><span class="value" id="blur-value"></span></div>
+          <div class="slider-row"><label for="bg-dim">Darken</label><input type="range" id="bg-dim" min="0" max="100" step="1"><span class="value" id="bg-dim-v"></span></div>
+          <div class="presets-row" role="group" aria-label="Blur presets">
+            <button class="chip" data-blur="10" data-dim="0">Subtle</button>
+            <button class="chip" data-blur="22" data-dim="10">Portrait</button>
+            <button class="chip" data-blur="40" data-dim="25">Strong</button>
+            <button class="chip" data-blur="60" data-dim="45">Spotlight</button>
+          </div>
         </div>
         <div class="group" id="color-group">
           <div class="group-title">Color</div>
@@ -121,6 +139,14 @@
             <input type="color" id="color" aria-label="Custom color">
             <input type="text" class="input" id="color-hex" maxlength="7" spellcheck="false" aria-label="Hex color" style="width:84px">
           </div>
+        </div>
+        <div class="group" id="edge-group">
+          <div class="group-title"><span>Edges</span><button class="link-btn" id="edge-reset" title="Put the edges back as the model finds them">Reset</button></div>
+          <div class="slider-row"><label for="bg-edge">Shift edge</label><input type="range" id="bg-edge" min="-100" max="100" step="1" list="bg-edge-marks"><span class="value" id="bg-edge-v"></span></div>
+          <datalist id="bg-edge-marks"><option value="0"></option></datalist>
+          <div class="slider-row"><label for="bg-hardness">Hardness</label><input type="range" id="bg-hardness" min="0" max="100" step="1"><span class="value" id="bg-hardness-v"></span></div>
+          <button class="btn wide" id="matte-view" aria-pressed="false" title="See the matte: you in white, the background in black (Alt+M)">Show matte</button>
+          <p class="hint">Shift the edge in to trim a halo of background around hair and shoulders, or out to keep more of you. Hardness tightens soft, see-through edges. Check them on the matte.</p>
         </div>
         <div class="note" id="preview-note">Pause anywhere to see the effect on that frame. Hold <span class="kbd">C</span> to compare with the original.</div>
       </section>
@@ -169,7 +195,10 @@
         </div>
         <div class="group" id="lines-group" hidden>
           <div class="group-title"><span>Captions</span><span id="lines-count"></span></div>
+          <input type="text" class="input" id="lines-filter" placeholder="Search captions" aria-label="Search captions" spellcheck="false">
+          <button class="warn-chip" id="lines-fast" hidden title="Select the captions that are on screen too briefly for their length"><svg class="icon"><use href="#i-alert"/></svg><span></span></button>
           <div class="lines" id="lines"></div>
+          <p class="hint">Shift+Enter splits a caption at the cursor. Backspace at the start joins it to the one before.</p>
         </div>
         <div class="group" id="cleanup-group">
           <div class="group-title">Clean up</div>
@@ -182,8 +211,18 @@
             <p class="hint" id="fr-count" role="status" aria-live="polite"></p>
           </div>
           <button class="btn wide" id="clean-filler">Remove filler words</button>
-          <button class="btn wide" id="import-srt">Import SRT…</button>
-          <input type="file" id="import-srt-file" accept=".srt,text/plain" hidden>
+          <div class="field">
+            <label for="shift-amount">Shift timing</label>
+            <div class="field-row">
+              <input type="text" inputmode="decimal" class="input" id="shift-amount" value="0.1" aria-label="Seconds to shift by" style="width:70px">
+              <span class="hint">s</span>
+              <button class="btn" id="shift-earlier" style="flex:1" title="Move the selected captions, or all of them, earlier">Earlier</button>
+              <button class="btn" id="shift-later" style="flex:1" title="Move the selected captions, or all of them, later">Later</button>
+            </div>
+            <p class="hint">For captions that show up early or late against the speech. Moves the selected captions, or every caption when none are selected.</p>
+          </div>
+          <button class="btn wide" id="import-srt">Import SRT or WebVTT…</button>
+          <input type="file" id="import-srt-file" accept=".srt,.vtt,text/plain,text/vtt" hidden>
         </div>
       </section>
 
@@ -201,8 +240,9 @@
             <button class="btn" id="grade-add" style="flex:1"><svg class="icon"><use href="#i-plus"/></svg><span id="grade-add-label">Add a 5s grade at the playhead</span></button>
           </div>
           <div class="field-row" id="grade-tools">
-            <button class="btn" id="grade-split" style="flex:1" title="Split this section at the playhead"><svg class="icon"><use href="#i-scissors"/></svg>Split at playhead</button>
-            <button class="btn" id="grade-delete" title="Remove this section's grade"><svg class="icon"><use href="#i-trash"/></svg>Remove</button>
+            <button class="btn" id="grade-split" style="flex:1" title="Split this section at the playhead (Ctrl+K)"><svg class="icon"><use href="#i-scissors"/></svg>Split</button>
+            <button class="btn" id="grade-bypass" aria-pressed="false" title="Switch this section's grade off and on (Ctrl+D)"><svg class="icon"><use href="#i-power"/></svg>Bypass</button>
+            <button class="btn icon-only" id="grade-delete" title="Remove this section's grade (Delete)" aria-label="Remove this section's grade"><svg class="icon"><use href="#i-trash"/></svg></button>
           </div>
         </div>
 
@@ -237,6 +277,29 @@
           </div>
 
           <div class="group">
+            <div class="group-title"><span>Curves</span><button class="link-btn" id="curve-reset" title="Straighten this curve">Reset</button></div>
+            <div class="segmented curve-channels" role="radiogroup" aria-label="Curve channel">
+              <input type="radio" name="curve-ch" id="curve-master" value="master" checked><label for="curve-master">Master</label>
+              <input type="radio" name="curve-ch" id="curve-red" value="red"><label for="curve-red" class="ch-red">Red</label>
+              <input type="radio" name="curve-ch" id="curve-green" value="green"><label for="curve-green" class="ch-green">Green</label>
+              <input type="radio" name="curve-ch" id="curve-blue" value="blue"><label for="curve-blue" class="ch-blue">Blue</label>
+            </div>
+            <div class="curve-box"><canvas id="curve-canvas" tabindex="0" role="img" aria-label="Curve editor"></canvas><span class="curve-readout" id="curve-readout"></span></div>
+            <p class="hint">Click the line to add a point and drag it. Drag a point off the graph, or double-click it, to remove it. The faint shape behind is this frame's histogram.</p>
+          </div>
+
+          <div class="group">
+            <div class="group-title"><span>HSL</span><button class="link-btn" id="hsl-reset" title="Reset every color">Reset</button></div>
+            <div class="segmented" role="radiogroup" aria-label="HSL property">
+              <input type="radio" name="hsl-prop" id="hsl-h" value="h" checked><label for="hsl-h">Hue</label>
+              <input type="radio" name="hsl-prop" id="hsl-s" value="s"><label for="hsl-s">Saturation</label>
+              <input type="radio" name="hsl-prop" id="hsl-l" value="l"><label for="hsl-l">Luminance</label>
+            </div>
+            <div id="hsl-rows"></div>
+            <p class="hint">Change one color at a time, like Lightroom's HSL panel: skies bluer, foliage less green, skin a touch lighter.</p>
+          </div>
+
+          <div class="group">
             <div class="group-title">LUT</div>
             <div class="field-row">
               <select id="grade-lut" aria-label="LUT" style="flex:1; min-width:0"></select>
@@ -258,7 +321,7 @@
           </div>
 
           <div class="group">
-            <div class="group-title">Color</div>
+            <div class="group-title"><span>Color</span><button class="link-btn" id="grade-wb-pick" title="Click something white or grey in the video to balance the color from it (Shift+click in the picker keeps the rest)"><svg class="icon"><use href="#i-pipette"/></svg>Pick neutral</button></div>
             <div class="slider-row"><label for="grade-temperature">Temperature</label><input type="range" class="temp" id="grade-temperature" data-key="temperature" min="-100" max="100" step="1"><span class="value" id="grade-temperature-v"></span></div>
             <div class="slider-row"><label for="grade-tint">Tint</label><input type="range" class="tint" id="grade-tint" data-key="tint" min="-100" max="100" step="1"><span class="value" id="grade-tint-v"></span></div>
             <div class="slider-row"><label for="grade-saturation">Saturation</label><input type="range" id="grade-saturation" data-key="saturation" min="-100" max="100" step="1"><span class="value" id="grade-saturation-v"></span></div>
@@ -266,8 +329,14 @@
           </div>
 
           <div class="group">
+            <div class="slider-row"><label for="grade-mix">Grade mix</label><input type="range" id="grade-mix" data-key="mix" min="0" max="100" step="1"><span class="value" id="grade-mix-v"></span></div>
+            <div class="field-row">
+              <button class="btn" id="grade-copy" style="flex:1" title="Copy this section's grade (Ctrl+C)"><svg class="icon"><use href="#i-copy"/></svg>Copy</button>
+              <button class="btn" id="grade-paste" style="flex:1" title="Paste a copied grade onto this section (Ctrl+V)"><svg class="icon"><use href="#i-paste"/></svg>Paste</button>
+              <button class="btn" id="grade-apply-all" style="flex:1" title="Give every graded section this look">Apply to all</button>
+            </div>
             <button class="btn wide" id="grade-reset">Reset this section</button>
-            <p class="hint">Double-click a slider to reset it. Hold <span class="kbd">C</span> to compare with the original.</p>
+            <p class="hint">Double-click a slider to reset it, or click its number to type one. Hold <span class="kbd">C</span> to compare with the original, or press <span class="kbd">W</span> for a split wipe.</p>
           </div>
         </div>
       </section>
@@ -280,6 +349,7 @@
           <img class="effect" id="effect" alt="" hidden>
           <canvas class="grade-layer" id="grade-layer" hidden></canvas>
           <div class="safe-zones" id="safe-zone-layer" hidden></div>
+          <div class="guides" id="guides-layer" hidden></div>
           <div class="caption-box" id="caption-box" hidden>
             <span class="caption-box-label">Drag to move</span>
             <div class="caption-box-handle" id="caption-box-handle" title="Drag to resize"></div>
@@ -297,18 +367,32 @@
       <div class="transport">
         <div class="scrub">
           <div class="seekbar" id="seekbar" role="slider" tabindex="0" aria-label="Playhead" aria-valuemin="0">
-            <div class="track"></div><div class="fill" id="seek-fill"></div><div class="knob" id="seek-knob"></div>
+            <div class="track"></div><div class="seek-range" id="seek-range" hidden></div><div class="fill" id="seek-fill"></div><div class="knob" id="seek-knob"></div>
           </div>
         </div>
-        <div class="timecode" id="timecode"><b>00:00:00:00</b> / 00:00:00:00</div>
+        <div class="left">
+          <button class="timecode" id="timecode" title="Click to type a time to jump to"><b>00:00:00:00</b> / 00:00:00:00</button>
+          <span class="rate-badge" id="rate-badge" hidden></span>
+          <div class="volume">
+            <button class="btn ghost icon-only" id="mute" aria-label="Mute" title="Mute"><svg class="icon"><use href="#i-volume"/></svg></button>
+            <input type="range" id="volume" min="0" max="100" step="1" aria-label="Volume">
+          </div>
+        </div>
         <div class="center">
+          <button class="btn ghost icon-only" id="mark-in" aria-label="Set In point" title="Set In point (I)"><svg class="icon"><use href="#i-in"/></svg></button>
           <button class="btn ghost icon-only" id="frame-back" aria-label="Previous frame" title="Previous frame (Left)"><svg class="icon"><use href="#i-prev"/></svg></button>
           <button class="btn icon-only" id="play" aria-label="Play" title="Play (Space)"><svg class="icon"><use href="#i-play"/></svg></button>
           <button class="btn ghost icon-only" id="frame-next" aria-label="Next frame" title="Next frame (Right)"><svg class="icon"><use href="#i-next"/></svg></button>
+          <button class="btn ghost icon-only" id="mark-out" aria-label="Set Out point" title="Set Out point (O)"><svg class="icon"><use href="#i-out"/></svg></button>
+          <button class="btn ghost icon-only" id="loop" aria-pressed="false" aria-label="Loop playback" title="Loop playback, between In and Out when they're set (Ctrl+L)"><svg class="icon"><use href="#i-loop"/></svg></button>
         </div>
         <div class="right">
           <button class="btn ghost" id="scopes-toggle" aria-pressed="false" title="Show colour scopes (Ctrl+Shift+S)" hidden><svg class="icon"><use href="#i-scope"/></svg>Scopes</button>
+          <button class="btn ghost" id="wipe-toggle" aria-pressed="false" title="Split wipe: the original on the left, the grade on the right (W)" hidden><svg class="icon"><use href="#i-wipe"/></svg>Wipe</button>
           <button class="btn ghost" id="compare" title="Hold to see the original (C)" hidden><svg class="icon"><use href="#i-compare"/></svg>Compare</button>
+          <button class="btn ghost icon-only" id="guides-btn" aria-label="Guides" title="Guides: safe areas, thirds and centre"><svg class="icon"><use href="#i-grid"/></svg></button>
+          <button class="btn ghost icon-only" id="snapshot" aria-label="Save this frame as an image" title="Save this frame as a PNG, with its grade and captions (Shift+E)"><svg class="icon"><use href="#i-camera"/></svg></button>
+          <button class="btn ghost icon-only" id="maximize" aria-pressed="false" aria-label="Full-screen viewer" title="Full-screen viewer (Shift+F)"><svg class="icon"><use href="#i-maximize"/></svg></button>
         </div>
       </div>
     </div>
@@ -337,10 +421,14 @@
           </div>
           <div class="field-row">
             <div class="segmented" role="radiogroup" aria-label="Letter case" style="flex:1">
-              <input type="radio" name="st-case" id="case-as" value="as"><label for="case-as">Aa</label>
-              <input type="radio" name="st-case" id="case-up" value="up"><label for="case-up">AA</label>
+              <input type="radio" name="st-case" id="case-as" value="as"><label for="case-as" title="As spoken">Aa</label>
+              <input type="radio" name="st-case" id="case-up" value="up"><label for="case-up" title="All capitals">AA</label>
+              <input type="radio" name="st-case" id="case-low" value="lower"><label for="case-low" title="All lowercase">aa</label>
+              <input type="radio" name="st-case" id="case-title" value="title"><label for="case-title" title="Capitalise Each Word">Ab</label>
             </div>
           </div>
+          <label class="check"><input type="checkbox" id="st-punct"> Hide punctuation</label>
+          <label class="check"><input type="checkbox" id="st-censor"> Bleep swear words (f***)</label>
           <div class="field">
             <div class="group-title"><label for="st-spacing">Letter spacing</label><span class="value" id="st-spacing-v"></span></div>
             <input type="range" id="st-spacing" min="-10" max="20" step="0.5" list="st-spacing-marks">
@@ -478,9 +566,9 @@
           <button class="btn ghost icon-only" id="tl-snap" aria-pressed="true" aria-label="Snapping" title="Snapping (S)"><svg class="icon"><use href="#i-magnet"/></svg></button>
           <span class="tl-sep" aria-hidden="true"></span>
           <button class="btn ghost" id="tl-split" title="Split the caption under the playhead (Ctrl+K)"><svg class="icon"><use href="#i-scissors"/></svg>Split</button>
-          <button class="btn ghost" id="tl-merge" title="Merge selected captions (M)"><svg class="icon"><use href="#i-merge"/></svg>Merge</button>
+          <button class="btn ghost" id="tl-merge" title="Merge selected captions (Shift+M)"><svg class="icon"><use href="#i-merge"/></svg>Merge</button>
           <button class="btn ghost" id="tl-add" title="Add a caption at the playhead (A)"><svg class="icon"><use href="#i-plus"/></svg>Add</button>
-          <button class="btn ghost" id="tl-delete" title="Delete selected captions (Delete)"><svg class="icon"><use href="#i-trash"/></svg>Delete</button>
+          <button class="btn ghost" id="tl-delete" title="Delete selected captions (Delete). Shift+Delete closes the gap too."><svg class="icon"><use href="#i-trash"/></svg>Delete</button>
           <span class="tl-sep" aria-hidden="true"></span>
           <div class="tl-place" role="group" aria-label="Move selected captions on screen">
             <button class="btn ghost" id="tl-top" data-place="top" title="Show the selected captions at the top (Alt+Up)">Top</button>
@@ -507,12 +595,13 @@
         </div>
         <div class="tl-scroll" id="tl-scroll">
           <div class="tl-content" id="tl-content">
-            <div class="tl-row ruler" id="tl-ruler-row"><canvas id="tl-ruler"></canvas></div>
+            <div class="tl-row ruler" id="tl-ruler-row"><canvas id="tl-ruler"></canvas><div class="tl-markers" id="tl-markers"></div></div>
             <div class="tl-row new-track" id="tl-new-track" title="Drag captions here, or double-click, to start a new track"><span>New track</span></div>
             <div id="tl-caption-rows"></div>
             <div class="tl-row grade" id="tl-grades"></div>
             <div class="tl-row video" id="tl-video-row"><canvas id="tl-video"></canvas></div>
             <div class="tl-row audio" id="tl-audio-row"><canvas id="tl-audio"></canvas></div>
+            <div class="tl-range" id="tl-range" hidden></div>
             <div class="tl-playhead" id="tl-playhead" aria-hidden="true"><div class="tl-playhead-head"></div></div>
             <div class="tl-snapline" id="tl-snapline" hidden></div>
             <div class="tl-marquee" id="tl-marquee" hidden></div>
@@ -536,6 +625,13 @@
         <div class="segmented" role="radiogroup" aria-label="What to export">
           <input type="radio" name="what" id="what-video" value="video" checked><label for="what-video">Video</label>
           <input type="radio" name="what" id="what-captions" value="captions"><label for="what-captions">Captions only</label>
+        </div>
+      </div>
+      <div class="field" id="export-range-field" hidden>
+        <span class="label">Range</span>
+        <div class="segmented" role="radiogroup" aria-label="What part of the video to export">
+          <input type="radio" name="range" id="range-all" value="all"><label for="range-all">Whole video</label>
+          <input type="radio" name="range" id="range-inout" value="inout" checked><label for="range-inout" id="range-inout-label">In to Out</label>
         </div>
       </div>
       <div class="field">
@@ -662,36 +758,61 @@
   </div>
   <div class="dlg-body">
     <div class="shortcuts">
+      <h3>Playback</h3>
       <span>Play or pause</span><span class="kbd">Space</span>
+      <span>Play, faster each press · stop · back a second</span><span class="kbd">L · K · J</span>
       <span>Previous or next frame</span><span class="kbd">Left / Right</span>
       <span>Back or forward 1 second</span><span class="kbd">Shift + Left / Right</span>
       <span>Jump to start or end</span><span class="kbd">Home / End</span>
+      <span>Previous or next edit point</span><span class="kbd">Up / Down</span>
+      <span>Go to a typed time</span><span class="kbd">Click the timecode</span>
+      <span>Loop playback</span><span class="kbd">Ctrl + L</span>
+      <span>Full-screen viewer</span><span class="kbd">Shift + F</span>
+      <span>Save this frame as a PNG</span><span class="kbd">Shift + E</span>
+
+      <h3>Markers and In / Out</h3>
+      <span>Add a marker (again to name it)</span><span class="kbd">M</span>
+      <span>Previous or next marker</span><span class="kbd">Shift + Up / Down</span>
+      <span>Set In or Out</span><span class="kbd">I / O</span>
+      <span>Go to In or Out</span><span class="kbd">Shift + I / O</span>
+      <span>Clear In and Out</span><span class="kbd">Alt + X</span>
+      <span>Play from In to Out</span><span class="kbd">Ctrl + Shift + Space</span>
+
+      <h3>Captions</h3>
       <span>Split a caption or colour section at the playhead</span><span class="kbd">Ctrl + K</span>
-      <span>Merge selected captions</span><span class="kbd">M</span>
+      <span>Merge selected captions</span><span class="kbd">Shift + M</span>
       <span>Add a caption at the playhead</span><span class="kbd">A</span>
       <span>Delete selected captions or a colour grade</span><span class="kbd">Delete</span>
+      <span>Delete and close the gap (ripple delete)</span><span class="kbd">Shift + Delete</span>
+      <span>Select captions from the playhead on</span><span class="kbd">Y</span>
+      <span>Select all captions</span><span class="kbd">Ctrl + A</span>
       <span>Nudge selected captions a frame (5 with Shift)</span><span class="kbd">Alt + Left / Right</span>
       <span>Move selected captions up or down the screen</span><span class="kbd">Alt + Up / Down</span>
-      <span>Select all captions</span><span class="kbd">Ctrl + A</span>
       <span>Cut, copy or paste captions (pastes at the playhead)</span><span class="kbd">Ctrl + X / C / V</span>
       <span>Duplicate captions onto the track above</span><span class="kbd">Ctrl + D</span>
       <span>Copy captions while dragging</span><span class="kbd">Alt + drag</span>
       <span>Move captions to another track</span><span class="kbd">Drag up / down</span>
-      <span>Previous or next edit point</span><span class="kbd">Up / Down</span>
-      <span>Play, faster each press · stop · back a second</span><span class="kbd">L · K · J</span>
-      <span>Zoom the timeline around the pointer</span><span class="kbd">Ctrl / Alt + wheel</span>
-      <span>Snapping on or off</span><span class="kbd">S</span>
+      <span>Split a caption in the list at the cursor</span><span class="kbd">Shift + Enter</span>
+      <span>Find and replace a caption word</span><span class="kbd">Ctrl + H</span>
+
+      <h3>Color and background</h3>
+      <span>Copy or paste a section's grade</span><span class="kbd">Ctrl + C / V</span>
+      <span>Bypass the selected grade, or all grades</span><span class="kbd">Ctrl + D · Shift + D</span>
+      <span>Split wipe between the original and the grade</span><span class="kbd">W</span>
+      <span>Compare with the original (hold)</span><span class="kbd">C</span>
       <span>Show or hide colour scopes</span><span class="kbd">Ctrl + Shift + S</span>
+      <span>Show the background matte</span><span class="kbd">Alt + M</span>
+
+      <h3>Timeline and app</h3>
+      <span>Zoom the timeline around the pointer</span><span class="kbd">Ctrl / Alt + wheel</span>
       <span>Zoom the timeline in or out</span><span class="kbd">= / -</span>
       <span>Fit the whole video</span><span class="kbd">Backslash</span>
-      <span>Compare with the original (hold)</span><span class="kbd">C</span>
+      <span>Snapping on or off</span><span class="kbd">S</span>
       <span>Background, Captions or Color tab</span><span class="kbd">Ctrl + 1 / 2 / 3</span>
-      <span>Undo</span><span class="kbd">Ctrl + Z</span>
-      <span>Redo</span><span class="kbd">Ctrl + Shift + Z</span>
+      <span>Undo · Redo</span><span class="kbd">Ctrl + Z · Ctrl + Shift + Z</span>
       <span>Export</span><span class="kbd">Ctrl + E</span>
       <span>Open a video</span><span class="kbd">Ctrl + O</span>
       <span>Back to start</span><span class="kbd">Ctrl + W</span>
-      <span>Find and replace a caption word</span><span class="kbd">Ctrl + H</span>
       <span>This list</span><span class="kbd">?</span>
     </div>
   </div>

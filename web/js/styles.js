@@ -21,6 +21,9 @@ export const DEFAULT_STYLE = {
   font: "Poppins ExtraBold",
   size: 0.085,         // text height, as a fraction of the frame's short side
   uppercase: true,
+  textCase: "as",      // when not uppercase: as (as spoken), lower or title
+  punctuation: "keep", // keep, or remove for the punctuation-free look of short-form captions
+  censor: false,       // bleep swear words as f***, on screen and in caption files
   spacing: 0,          // letter spacing, as a fraction of the text size
   fill: "#ffffff",
   highlight: "#ffd43b",

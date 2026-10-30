@@ -55,6 +55,22 @@ pub struct Settings {
     pub mode: Mode,
     pub blur: f32,
     pub color: [u8; 3],
+    /// Moves the matte's edge out (positive) or in (negative), -1 to 1, like After Effects' Shift Edge.
+    pub edge: f32,
+    /// How sharply the matte goes from background to subject, 0 (as the model gives it) to 1 (hard).
+    pub hardness: f32,
+    /// Darkens a blurred background, 0 to 1, so the subject stands out more.
+    pub dim: f32,
+}
+
+impl Settings {
+    /// The matte's ramp after shifting and hardening it: `alpha' = (alpha - low) / width`. With the
+    /// edge and hardness at 0 it's the model's matte as it is.
+    fn ramp(self) -> (f32, f32) {
+        let width = 1.0 - 0.95 * self.hardness.clamp(0.0, 1.0);
+        let centre = 0.5 - 0.4 * self.edge.clamp(-1.0, 1.0);
+        (centre - width / 2.0, width)
+    }
 }
 
 /// Output container and codec.
@@ -148,6 +164,9 @@ pub struct Job {
     pub grades: Vec<Grade>,
     /// Render only the captions, on a transparent background, to lay over the video in another editor.
     pub captions_only: bool,
+    /// Export only this stretch, as (start, end) seconds; None for the whole video. Captions and
+    /// grades arrive already shifted to start at 0.
+    pub range: Option<(f64, f64)>,
     pub settings: Settings,
     pub export: ExportSettings,
     pub status: Arc<Mutex<Status>>,
@@ -161,6 +180,17 @@ pub struct Grade {
 }
 
 impl Job {
+    /// Where the export starts in the original (None from the beginning) and how long it runs.
+    fn span(&self, info: &VideoInfo) -> (Option<f64>, f64) {
+        match self.range {
+            Some((start, end)) => {
+                let start = start.clamp(0.0, info.duration.max(0.0));
+                (Some(start), (end.min(info.duration) - start).max(0.05))
+            }
+            None => (None, info.duration),
+        }
+    }
+
     fn partial_path(&self) -> PathBuf {
         let mut name = self.output.file_name().unwrap_or_default().to_os_string();
         name.push(".halo-partial");
@@ -229,7 +259,8 @@ impl Engine {
     }
 
     /// Renders the frame at `at` seconds exactly as the export would, as a JPEG (PNG when transparent).
-    pub fn preview(&self, input: &Path, at: f64, settings: Settings) -> Result<Preview> {
+    /// With `matte`, it's the matte itself instead: the subject white, the background black.
+    pub fn preview(&self, input: &Path, at: f64, settings: Settings, matte: bool) -> Result<Preview> {
         let info = probe(input)?;
         let start = (at - PREVIEW_WARMUP_SECS).max(0.0);
         let mut decoder = Decoder::spawn(input, &info, settings, Some(start), Some(at - start))?;
@@ -250,12 +281,18 @@ impl Engine {
             bail!("no frame at {at:.2}s");
         }
         let mut out = Vec::new();
-        compositor.composite(&last, &pha, &mut out);
+        let matte = matte && settings.mode != Mode::None;
+        if matte {
+            compositor.matte(&pha, &mut out);
+        } else {
+            compositor.composite(&last, &pha, &mut out);
+        }
 
         let (codec, content_type) =
-            if settings.mode == Mode::Remove { ("png", "image/png") } else { ("mjpeg", "image/jpeg") };
+            if settings.mode == Mode::Remove && !matte { ("png", "image/png") } else { ("mjpeg", "image/jpeg") };
+        let pix_fmt = if matte { "rgb24" } else { settings.mode.pix_fmt() };
         let mut encoder = tool("ffmpeg")
-            .args(["-v", "error", "-f", "rawvideo", "-pix_fmt", settings.mode.pix_fmt()])
+            .args(["-v", "error", "-f", "rawvideo", "-pix_fmt", pix_fmt])
             .args(["-s", &format!("{}x{}", info.width, info.height), "-i", "-"])
             .args(["-frames:v", "1", "-c:v", codec, "-q:v", "3", "-f", "image2pipe", "-"])
             .stdin(Stdio::piped())
@@ -284,15 +321,19 @@ impl Engine {
         }
         // Scaling at decode time means the whole pipeline runs at the export size.
         let info = export_info(&job.input, max_side)?;
-        job.status.lock().unwrap().total = info.frames;
+        let (start, duration) = job.span(&info);
+        job.status.lock().unwrap().total = info.frames_in(duration);
 
-        let mut decoder = Decoder::spawn(&job.input, &info, settings, None, None)?;
+        let mut decoder = Decoder::spawn(&job.input, &info, settings, start, start.map(|_| duration))?;
         let mut encode = tool("ffmpeg");
         encode
             .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", mode.pix_fmt()])
-            .args(["-s", &format!("{}x{}", info.width, info.height), "-framerate", &info.fps, "-i", "-", "-i"])
-            .arg(&job.input)
-            .arg("-shortest");
+            .args(["-s", &format!("{}x{}", info.width, info.height), "-framerate", &info.fps, "-i", "-"]);
+        // The audio comes from the same stretch of the original.
+        if let Some(start) = start {
+            encode.args(["-ss", &format!("{start:.3}"), "-t", &format!("{duration:.3}")]);
+        }
+        encode.arg("-i").arg(&job.input).arg("-shortest");
         let subs_of = |path: &PathBuf| {
             let fonts = path.with_file_name("fonts");
             format!("subtitles=filename='{}':fontsdir='{}'", filter_path(path), filter_path(&fonts))
@@ -500,7 +541,8 @@ fn overlay(job: &Job) -> Result<()> {
     }
     let captions = job.captions.as_ref().context("there are no captions to export")?;
     let info = export_info(&job.input, max_side)?;
-    job.status.lock().unwrap().total = info.frames;
+    let (_, duration) = job.span(&info);
+    job.status.lock().unwrap().total = info.frames_in(duration);
     let fonts = captions.with_file_name("fonts");
     let subs = format!("subtitles=filename='{}':fontsdir='{}'", filter_path(captions), filter_path(&fonts));
     // As with transparent exports, libass leaves alpha alone: drawn over black and over white,
@@ -509,7 +551,7 @@ fn overlay(job: &Job) -> Result<()> {
     let graph = format!(
         "[0:v]format=rgb24,split[b][w];[w]drawbox=x=0:y=0:w=iw:h=ih:c=white:t=fill,{subs},format=gbrp[cw];         [b]{subs},format=gbrp,split[cb][c];[cb][cw]blend=all_mode=difference,extractplanes=g,negate[a];         [c][a]alphamerge,unpremultiply=inplace=1[out]"
     );
-    let source = format!("color=c=black:s={}x{}:r={}:d={:.3}", info.width, info.height, info.fps, info.duration);
+    let source = format!("color=c=black:s={}x{}:r={}:d={:.3}", info.width, info.height, info.fps, duration);
     let mut encode = tool("ffmpeg");
     encode
         .args(["-v", "error", "-y", "-nostats", "-progress", "pipe:1", "-f", "lavfi", "-i", &source])
@@ -782,7 +824,9 @@ impl Compositor {
     /// Blends the original frame over the new background using the (upscaled) matte `pha`.
     fn composite(&self, frame: &[u8], pha: &[f32], out: &mut Vec<u8>) {
         let Layout { w, h, .. } = self.layout;
-        let Settings { mode, color, .. } = self.settings;
+        let Settings { mode, color, dim, .. } = self.settings;
+        let (low, width) = self.settings.ramp();
+        let keep = 1.0 - 0.85 * dim.clamp(0.0, 1.0);
         let channels = mode.channels();
         let mw = self.mw;
         if mode == Mode::None {
@@ -798,7 +842,8 @@ impl Compositor {
             let row = &frame[y * w * 3..(y + 1) * w * 3];
             for x in 0..w {
                 let (mx0, mx1, tx) = self.up_x[x];
-                let a = lerp(lerp(pha0[mx0], pha0[mx1], tx), lerp(pha1[mx0], pha1[mx1], tx), ty).clamp(0.0, 1.0);
+                let a = lerp(lerp(pha0[mx0], pha0[mx1], tx), lerp(pha1[mx0], pha1[mx1], tx), ty);
+                let a = ((a - low) / width).clamp(0.0, 1.0);
                 let src = &row[x * 3..x * 3 + 3];
                 let dst = &mut out_row[x * channels..(x + 1) * channels];
                 match mode {
@@ -821,10 +866,28 @@ impl Compositor {
                         for c in 0..3 {
                             let top = lerp(b0[bx0 * 3 + c] as f32, b0[bx1 * 3 + c] as f32, bx);
                             let bottom = lerp(b1[bx0 * 3 + c] as f32, b1[bx1 * 3 + c] as f32, bx);
-                            dst[c] = lerp(lerp(top, bottom, by), src[c] as f32, a) as u8;
+                            dst[c] = lerp(lerp(top, bottom, by) * keep, src[c] as f32, a) as u8;
                         }
                     }
                 }
+            }
+        });
+    }
+
+    /// The matte as a grey picture at the frame's size, shifted and hardened as the export uses it.
+    fn matte(&self, pha: &[f32], out: &mut Vec<u8>) {
+        let Layout { w, h, .. } = self.layout;
+        let (low, width) = self.settings.ramp();
+        let mw = self.mw;
+        out.resize(w * h * 3, 0);
+        out.par_chunks_mut(w * 3).enumerate().for_each(|(y, out_row)| {
+            let (my0, my1, ty) = self.up_y[y];
+            let (pha0, pha1) = (&pha[my0 * mw..], &pha[my1 * mw..]);
+            for x in 0..w {
+                let (mx0, mx1, tx) = self.up_x[x];
+                let a = lerp(lerp(pha0[mx0], pha0[mx1], tx), lerp(pha1[mx0], pha1[mx1], tx), ty);
+                let v = (((a - low) / width).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                out_row[x * 3..x * 3 + 3].fill(v);
             }
         });
     }
@@ -838,6 +901,13 @@ struct VideoInfo {
     fps_value: f64,
     duration: f64,
     frames: u64,
+}
+
+impl VideoInfo {
+    /// About how many frames `duration` seconds holds; the whole video's count when that's all of it.
+    fn frames_in(&self, duration: f64) -> u64 {
+        if duration >= self.duration - 1e-3 { self.frames } else { (duration * self.fps_value).round().max(1.0) as u64 }
+    }
 }
 
 #[derive(Serialize)]
