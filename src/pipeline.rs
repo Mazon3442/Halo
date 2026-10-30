@@ -55,6 +55,22 @@ pub struct Settings {
     pub mode: Mode,
     pub blur: f32,
     pub color: [u8; 3],
+    /// Moves the matte's edge out (positive) or in (negative), -1 to 1, like After Effects' Shift Edge.
+    pub edge: f32,
+    /// How sharply the matte goes from background to subject, 0 (as the model gives it) to 1 (hard).
+    pub hardness: f32,
+    /// Darkens a blurred background, 0 to 1, so the subject stands out more.
+    pub dim: f32,
+}
+
+impl Settings {
+    /// The matte's ramp after shifting and hardening it: `alpha' = (alpha - low) / width`. With the
+    /// edge and hardness at 0 it's the model's matte as it is.
+    fn ramp(self) -> (f32, f32) {
+        let width = 1.0 - 0.95 * self.hardness.clamp(0.0, 1.0);
+        let centre = 0.5 - 0.4 * self.edge.clamp(-1.0, 1.0);
+        (centre - width / 2.0, width)
+    }
 }
 
 /// Output container and codec.
@@ -148,6 +164,9 @@ pub struct Job {
     pub grades: Vec<Grade>,
     /// Render only the captions, on a transparent background, to lay over the video in another editor.
     pub captions_only: bool,
+    /// Export only this stretch, as (start, end) seconds; None for the whole video. Captions and
+    /// grades arrive already shifted to start at 0.
+    pub range: Option<(f64, f64)>,
     pub settings: Settings,
     pub export: ExportSettings,
     pub status: Arc<Mutex<Status>>,
@@ -161,6 +180,17 @@ pub struct Grade {
 }
 
 impl Job {
+    /// Where the export starts in the original (None from the beginning) and how long it runs.
+    fn span(&self, info: &VideoInfo) -> (Option<f64>, f64) {
+        match self.range {
+            Some((start, end)) => {
+                let start = start.clamp(0.0, info.duration.max(0.0));
+                (Some(start), (end.min(info.duration) - start).max(0.05))
+            }
+            None => (None, info.duration),
+        }
+    }
+
     fn partial_path(&self) -> PathBuf {
         let mut name = self.output.file_name().unwrap_or_default().to_os_string();
         name.push(".halo-partial");
@@ -229,7 +259,8 @@ impl Engine {
     }
 
     /// Renders the frame at `at` seconds exactly as the export would, as a JPEG (PNG when transparent).
-    pub fn preview(&self, input: &Path, at: f64, settings: Settings) -> Result<Preview> {
+    /// With `matte`, it's the matte itself instead: the subject white, the background black.
+    pub fn preview(&self, input: &Path, at: f64, settings: Settings, matte: bool) -> Result<Preview> {
         let info = probe(input)?;
         let start = (at - PREVIEW_WARMUP_SECS).max(0.0);
         let mut decoder = Decoder::spawn(input, &info, settings, Some(start), Some(at - start))?;
@@ -250,12 +281,18 @@ impl Engine {
             bail!("no frame at {at:.2}s");
         }
         let mut out = Vec::new();
-        compositor.composite(&last, &pha, &mut out);
+        let matte = matte && settings.mode != Mode::None;
+        if matte {
+            compositor.matte(&pha, &mut out);
+        } else {
+            compositor.composite(&last, &pha, &mut out);
+        }
 
         let (codec, content_type) =
-            if settings.mode == Mode::Remove { ("png", "image/png") } else { ("mjpeg", "image/jpeg") };
+            if settings.mode == Mode::Remove && !matte { ("png", "image/png") } else { ("mjpeg", "image/jpeg") };
+        let pix_fmt = if matte { "rgb24" } else { settings.mode.pix_fmt() };
         let mut encoder = tool("ffmpeg")
-            .args(["-v", "error", "-f", "rawvideo", "-pix_fmt", settings.mode.pix_fmt()])
+            .args(["-v", "error", "-f", "rawvideo", "-pix_fmt", pix_fmt])
             .args(["-s", &format!("{}x{}", info.width, info.height), "-i", "-"])
             .args(["-frames:v", "1", "-c:v", codec, "-q:v", "3", "-f", "image2pipe", "-"])
             .stdin(Stdio::piped())
@@ -284,15 +321,19 @@ impl Engine {
         }
         // Scaling at decode time means the whole pipeline runs at the export size.
         let info = export_info(&job.input, max_side)?;
-        job.status.lock().unwrap().total = info.frames;
+        let (start, duration) = job.span(&info);
+        job.status.lock().unwrap().total = info.frames_in(duration);
 
-        let mut decoder = Decoder::spawn(&job.input, &info, settings, None, None)?;
+        let mut decoder = Decoder::spawn(&job.input, &info, settings, start, start.map(|_| duration))?;
         let mut encode = tool("ffmpeg");
         encode
             .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", mode.pix_fmt()])
-            .args(["-s", &format!("{}x{}", info.width, info.height), "-framerate", &info.fps, "-i", "-", "-i"])
-            .arg(&job.input)
-            .arg("-shortest");
+            .args(["-s", &format!("{}x{}", info.width, info.height), "-framerate", &info.fps, "-i", "-"]);
+        // The audio comes from the same stretch of the original.
+        if let Some(start) = start {
+            encode.args(["-ss", &format!("{start:.3}"), "-t", &format!("{duration:.3}")]);
+        }
+        encode.arg("-i").arg(&job.input).arg("-shortest");
         let subs_of = |path: &PathBuf| {
             let fonts = path.with_file_name("fonts");
             format!("subtitles=filename='{}':fontsdir='{}'", filter_path(path), filter_path(&fonts))
@@ -300,10 +341,8 @@ impl Engine {
         let tracks: Vec<String> = job.captions.iter().chain(&job.caption_mask).map(subs_of).collect();
         // Grading comes first, so it colours the video and not the captions drawn over it.
         let grade = grade_filters(&job.grades);
-        if tracks.is_empty() && grade.is_empty() {
-            encode.args(["-map", "0:v"]);
-        } else if tracks.is_empty() {
-            encode.args(["-filter_complex", &format!("[0:v]{grade}null[out]"), "-map", "[out]"]);
+        if tracks.is_empty() {
+            encode.args(["-filter_complex", &format!("[0:v]{grade}{ENCODE_709}[out]"), "-map", "[out]"]);
         } else {
             // Without a mask (or with a transparent background, where there's no video to
             // invert) every track is simply drawn.
@@ -319,7 +358,7 @@ impl Engine {
                 format!(
                     "[0:v]{grade}split=3[v][b][w];[v]{subs},split[rgb][s];[s]alphaextract[va];\
                      [b]{}[cb];[w]{}[cw];[cb][cw]blend=all_mode=difference,extractplanes=g,negate[ca];\
-                     [va][ca]blend=all_mode=lighten[alpha];[rgb][alpha]alphamerge[out]",
+                     [va][ca]blend=all_mode=lighten[alpha];[rgb][alpha]alphamerge,{ENCODE_709}[out]",
                     canvas("black"),
                     canvas("white"),
                 )
@@ -330,17 +369,17 @@ impl Engine {
                 // keep their hue: dark brown shows as light tan.
                 let frame = job.captions.as_ref().map(|c| format!("{},", subs_of(c))).unwrap_or_default();
                 format!(
-                    "[0:v]{grade}{frame}format=yuv444p,split=3[v][n][m];[n]lutyuv=y=negval[inv];\
+                    "[0:v]{grade}{frame}scale=out_color_matrix=bt709:out_range=tv,format=yuv444p,split=3[v][n][m];[n]lutyuv=y=negval[inv];\
                      [m]drawbox=x=0:y=0:w=iw:h=ih:c=black:t=fill,{},lutyuv=y='clip((val-16)*255/219,0,255)'[mask];\
-                     [v][inv][mask]maskedmerge=planes=1[out]",
+                     [v][inv][mask]maskedmerge=planes=1,{ENCODE_709}[out]",
                     subs_of(mask)
                 )
             } else {
-                format!("[0:v]{grade}{subs}[out]")
+                format!("[0:v]{grade}{subs},{ENCODE_709}[out]")
             };
             encode.args(["-filter_complex", &graph, "-map", "[out]"]);
         }
-        encode.args(["-map", "1:a?"]);
+        encode.args(["-map", "1:a?"]).args(TAGS_709);
         match format {
             Format::H264 | Format::H265 => {
                 let hevc = format == Format::H265;
@@ -476,6 +515,13 @@ fn export_info(input: &Path, max_side: Option<usize>) -> Result<VideoInfo> {
     Ok(info)
 }
 
+/// The last step before encoding: frames become YUV with the Rec.709 matrix, in video range.
+/// Left to itself ffmpeg would use the Rec.601 matrix and tag nothing, and players reading
+/// untagged HD as Rec.709 would show the colours shifted (reds orange, greens yellow).
+const ENCODE_709: &str = "scale=in_color_matrix=bt709:out_color_matrix=bt709:out_range=tv";
+/// Says so in the file, so every player decodes it the same way.
+const TAGS_709: [&str; 8] = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"];
+
 /// One `lut3d` per graded section, each switched on for its own stretch of time; empty or ending
 /// in a comma, so it can lead a filter chain.
 fn grade_filters(grades: &[Grade]) -> String {
@@ -500,20 +546,22 @@ fn overlay(job: &Job) -> Result<()> {
     }
     let captions = job.captions.as_ref().context("there are no captions to export")?;
     let info = export_info(&job.input, max_side)?;
-    job.status.lock().unwrap().total = info.frames;
+    let (_, duration) = job.span(&info);
+    job.status.lock().unwrap().total = info.frames_in(duration);
     let fonts = captions.with_file_name("fonts");
     let subs = format!("subtitles=filename='{}':fontsdir='{}'", filter_path(captions), filter_path(&fonts));
     // As with transparent exports, libass leaves alpha alone: drawn over black and over white,
     // the captions differ by their transparency, and the colour over black is the colour times
     // that alpha, so it's divided back out.
     let graph = format!(
-        "[0:v]format=rgb24,split[b][w];[w]drawbox=x=0:y=0:w=iw:h=ih:c=white:t=fill,{subs},format=gbrp[cw];         [b]{subs},format=gbrp,split[cb][c];[cb][cw]blend=all_mode=difference,extractplanes=g,negate[a];         [c][a]alphamerge,unpremultiply=inplace=1[out]"
+        "[0:v]format=rgb24,split[b][w];[w]drawbox=x=0:y=0:w=iw:h=ih:c=white:t=fill,{subs},format=gbrp[cw];         [b]{subs},format=gbrp,split[cb][c];[cb][cw]blend=all_mode=difference,extractplanes=g,negate[a];         [c][a]alphamerge,unpremultiply=inplace=1,{ENCODE_709}[out]"
     );
-    let source = format!("color=c=black:s={}x{}:r={}:d={:.3}", info.width, info.height, info.fps, info.duration);
+    let source = format!("color=c=black:s={}x{}:r={}:d={:.3}", info.width, info.height, info.fps, duration);
     let mut encode = tool("ffmpeg");
     encode
         .args(["-v", "error", "-y", "-nostats", "-progress", "pipe:1", "-f", "lavfi", "-i", &source])
-        .args(["-filter_complex", &graph, "-map", "[out]"]);
+        .args(["-filter_complex", &graph, "-map", "[out]"])
+        .args(TAGS_709);
     match format {
         Format::ProRes => {
             encode.args(["-c:v", "prores_ks", "-profile:v", "4", "-pix_fmt", "yuva444p10le", "-alpha_bits", "16"]);
@@ -600,6 +648,10 @@ impl Decoder {
         let Layout { w, h, blur_w, blur_h } = layout;
         // Constant frame rate so the re-muxed audio stays in sync.
         let mut vf = format!("fps={},scale={w}:{h}", info.fps);
+        if let Some(hdr) = info.hdr {
+            vf += ",";
+            vf += hdr.filters()?.trim_end_matches(',');
+        }
         if settings.mode == Mode::Blur {
             let sigma = settings.blur / BLUR_SCALE as f32;
             vf += &format!(
@@ -782,7 +834,9 @@ impl Compositor {
     /// Blends the original frame over the new background using the (upscaled) matte `pha`.
     fn composite(&self, frame: &[u8], pha: &[f32], out: &mut Vec<u8>) {
         let Layout { w, h, .. } = self.layout;
-        let Settings { mode, color, .. } = self.settings;
+        let Settings { mode, color, dim, .. } = self.settings;
+        let (low, width) = self.settings.ramp();
+        let keep = 1.0 - 0.85 * dim.clamp(0.0, 1.0);
         let channels = mode.channels();
         let mw = self.mw;
         if mode == Mode::None {
@@ -798,7 +852,8 @@ impl Compositor {
             let row = &frame[y * w * 3..(y + 1) * w * 3];
             for x in 0..w {
                 let (mx0, mx1, tx) = self.up_x[x];
-                let a = lerp(lerp(pha0[mx0], pha0[mx1], tx), lerp(pha1[mx0], pha1[mx1], tx), ty).clamp(0.0, 1.0);
+                let a = lerp(lerp(pha0[mx0], pha0[mx1], tx), lerp(pha1[mx0], pha1[mx1], tx), ty);
+                let a = ((a - low) / width).clamp(0.0, 1.0);
                 let src = &row[x * 3..x * 3 + 3];
                 let dst = &mut out_row[x * channels..(x + 1) * channels];
                 match mode {
@@ -821,10 +876,28 @@ impl Compositor {
                         for c in 0..3 {
                             let top = lerp(b0[bx0 * 3 + c] as f32, b0[bx1 * 3 + c] as f32, bx);
                             let bottom = lerp(b1[bx0 * 3 + c] as f32, b1[bx1 * 3 + c] as f32, bx);
-                            dst[c] = lerp(lerp(top, bottom, by), src[c] as f32, a) as u8;
+                            dst[c] = lerp(lerp(top, bottom, by) * keep, src[c] as f32, a) as u8;
                         }
                     }
                 }
+            }
+        });
+    }
+
+    /// The matte as a grey picture at the frame's size, shifted and hardened as the export uses it.
+    fn matte(&self, pha: &[f32], out: &mut Vec<u8>) {
+        let Layout { w, h, .. } = self.layout;
+        let (low, width) = self.settings.ramp();
+        let mw = self.mw;
+        out.resize(w * h * 3, 0);
+        out.par_chunks_mut(w * 3).enumerate().for_each(|(y, out_row)| {
+            let (my0, my1, ty) = self.up_y[y];
+            let (pha0, pha1) = (&pha[my0 * mw..], &pha[my1 * mw..]);
+            for x in 0..w {
+                let (mx0, mx1, tx) = self.up_x[x];
+                let a = lerp(lerp(pha0[mx0], pha0[mx1], tx), lerp(pha1[mx0], pha1[mx1], tx), ty);
+                let v = (((a - low) / width).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                out_row[x * 3..x * 3 + 3].fill(v);
             }
         });
     }
@@ -838,6 +911,15 @@ struct VideoInfo {
     fps_value: f64,
     duration: f64,
     frames: u64,
+    /// Set for HDR video, which is brought down to standard range as it's decoded.
+    hdr: Option<Hdr>,
+}
+
+impl VideoInfo {
+    /// About how many frames `duration` seconds holds; the whole video's count when that's all of it.
+    fn frames_in(&self, duration: f64) -> u64 {
+        if duration >= self.duration - 1e-3 { self.frames } else { (duration * self.fps_value).round().max(1.0) as u64 }
+    }
 }
 
 #[derive(Serialize)]
@@ -846,18 +928,20 @@ pub struct MediaSummary {
     pub height: usize,
     pub duration: f64,
     pub fps: f64,
+    /// "hlg" or "pq" for HDR video.
+    pub hdr: Option<&'static str>,
 }
 
 /// What the page needs to know about a video: its displayed size, length and frame rate.
 pub fn probe_summary(input: &Path) -> Result<MediaSummary> {
     let info = probe(input)?;
-    Ok(MediaSummary { width: info.width, height: info.height, duration: info.duration, fps: info.fps_value })
+    Ok(MediaSummary { width: info.width, height: info.height, duration: info.duration, fps: info.fps_value, hdr: info.hdr.map(Hdr::name) })
 }
 
 fn probe(input: &Path) -> Result<VideoInfo> {
     let output = tool("ffprobe")
         .args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
-        .args(["stream=width,height,avg_frame_rate:stream_side_data=rotation:format=duration", "-of", "json"])
+        .args(["stream=width,height,avg_frame_rate,color_transfer:stream_side_data=rotation:format=duration", "-of", "json"])
         .arg(input)
         .output()
         .context("failed to start ffprobe")?;
@@ -891,7 +975,94 @@ fn probe(input: &Path) -> Result<VideoInfo> {
         .and_then(|(n, d)| Some(n.parse::<f64>().ok()? / d.parse::<f64>().ok()?))
         .unwrap_or(30.0);
     let duration: f64 = json["format"]["duration"].as_str().and_then(|d| d.parse().ok()).unwrap_or(0.0);
-    Ok(VideoInfo { width, height, fps, fps_value, duration, frames: (duration * fps_value).round() as u64 })
+    let hdr = match stream["color_transfer"].as_str() {
+        Some("arib-std-b67") => Some(Hdr::Hlg),
+        Some("smpte2084") => Some(Hdr::Pq),
+        _ => None,
+    };
+    Ok(VideoInfo { width, height, fps, fps_value, duration, frames: (duration * fps_value).round() as u64, hdr })
+}
+
+/// HDR transfer functions. Phones record HLG by default (iPhones since the 12); PQ is HDR10.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Hdr {
+    Hlg,
+    Pq,
+}
+
+impl Hdr {
+    fn name(self) -> &'static str {
+        match self {
+            Hdr::Hlg => "hlg",
+            Hdr::Pq => "pq",
+        }
+    }
+
+    /// Standard-range light for a pixel of this HDR signal, as Chromium shows it: relative to
+    /// HDR reference white (203 nits, ITU-R BT.2408), in BT.2020 primaries. HLG goes through its
+    /// display OOTF for a 1000-nit screen; PQ is absolute.
+    fn light(self, rgb: [f64; 3]) -> [f64; 3] {
+        const REFERENCE_WHITE: f64 = 203.0;
+        match self {
+            Hdr::Hlg => {
+                let (a, b, c) = (0.17883277, 0.28466892, 0.55991073);
+                let scene = rgb.map(|e| if e <= 0.5 { e * e / 3.0 } else { (((e - c) / a).exp() + b) / 12.0 });
+                let y = 0.2627 * scene[0] + 0.6780 * scene[1] + 0.0593 * scene[2];
+                let ootf = 1000.0 * y.max(1e-12).powf(0.2) / REFERENCE_WHITE;
+                scene.map(|v| v * ootf)
+            }
+            Hdr::Pq => {
+                let (m1, m2) = (0.1593017578125, 78.84375);
+                let (c1, c2, c3) = (0.8359375, 18.8515625, 18.6875);
+                rgb.map(|e| {
+                    let p = e.powf(1.0 / m2);
+                    10000.0 * ((p - c1).max(0.0) / (c2 - c3 * p)).powf(1.0 / m1) / REFERENCE_WHITE
+                })
+            }
+        }
+    }
+
+    /// A .cube taking full-range BT.2020 R'G'B' of this signal to sRGB-encoded Rec.709, clipped,
+    /// written once to the temp folder. Chromium shows HDR video exactly this way (measured
+    /// against it), so exports look like the player: grades made in the preview carry over.
+    fn lut(self) -> Result<PathBuf> {
+        const SIZE: usize = 65;
+        const TO_709: [[f64; 3]; 3] = [
+            [1.660491, -0.587641, -0.072850],
+            [-0.124550, 1.132900, -0.008349],
+            [-0.018151, -0.100579, 1.118730],
+        ];
+        let path = std::env::temp_dir().join(format!("halo-{}-to-sdr-v1.cube", self.name()));
+        if path.is_file() {
+            return Ok(path);
+        }
+        let srgb = |v: f64| {
+            let v = v.clamp(0.0, 1.0);
+            if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+        };
+        let mut text = format!("TITLE \"Halo {} to SDR\"\nLUT_3D_SIZE {SIZE}\n", self.name().to_uppercase());
+        let step = (SIZE - 1) as f64;
+        for b in 0..SIZE {
+            for g in 0..SIZE {
+                for r in 0..SIZE {
+                    let light = self.light([r as f64 / step, g as f64 / step, b as f64 / step]);
+                    let out = TO_709.map(|row| srgb(row[0] * light[0] + row[1] * light[1] + row[2] * light[2]));
+                    text += &format!("{:.6} {:.6} {:.6}\n", out[0], out[1], out[2]);
+                }
+            }
+        }
+        // Written aside and moved into place, so a half-written file is never used.
+        let partial = path.with_extension(format!("{}.part", std::process::id()));
+        std::fs::write(&partial, text)?;
+        std::fs::rename(&partial, &path).or_else(|_| if path.is_file() { Ok(()) } else { Err(std::io::Error::other("couldn't save the HDR conversion")) })?;
+        Ok(path)
+    }
+
+    /// Filters that bring this signal to standard range, ending in a comma. 16-bit RGB in between,
+    /// so the conversion doesn't band.
+    fn filters(self) -> Result<String> {
+        Ok(format!("format=gbrp16le,lut3d=file='{}':interp=tetrahedral,", filter_path(&self.lut()?)))
+    }
 }
 
 fn nvenc_available() -> bool {
@@ -1012,7 +1183,10 @@ pub fn thumbnails(input: &Path, count: usize, height: usize) -> Result<Thumbnail
         .arg("-i")
         .arg(input)
         .args(["-an", "-sn", "-vf"])
-        .arg(format!("fps={rate:.6},scale={thumb_width}:{height}:flags=bilinear,tile={COLUMNS}x{rows}"))
+        .arg(format!(
+            "fps={rate:.6},scale={thumb_width}:{height}:flags=bilinear,{}tile={COLUMNS}x{rows}",
+            info.hdr.map(Hdr::filters).transpose()?.unwrap_or_default()
+        ))
         .args(["-frames:v", "1", "-q:v", "5", "-f", "image2pipe", "-c:v", "mjpeg", "-"])
         .stdin(Stdio::null())
         .output()
@@ -1021,4 +1195,22 @@ pub fn thumbnails(input: &Path, count: usize, height: usize) -> Result<Thumbnail
         bail!("couldn't make thumbnails: {}", String::from_utf8_lossy(&output.stderr).trim());
     }
     Ok(Thumbnails { jpeg: output.stdout, columns: COLUMNS, thumb_width })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hdr_reference_white_is_standard_white() {
+        // 75% HLG and PQ's 203-nit code value (0.5806) are BT.2408's reference white.
+        for (hdr, code) in [(Hdr::Hlg, 0.75), (Hdr::Pq, 0.5806)] {
+            let [r, g, b] = hdr.light([code; 3]);
+            assert!((r - 1.0).abs() < 0.01 && (g - r).abs() < 1e-9 && (b - r).abs() < 1e-9, "{hdr:?}: {r}");
+        }
+        // HLG's 40% grey, which Chromium shows as 107 of 255.
+        let grey = Hdr::Hlg.light([0.4; 3])[0];
+        let shown = 1.055 * grey.powf(1.0 / 2.4) - 0.055;
+        assert!((shown * 255.0 - 107.0).abs() < 1.0, "{shown}");
+    }
 }

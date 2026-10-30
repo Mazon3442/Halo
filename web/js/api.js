@@ -33,6 +33,12 @@ export const api = {
     if (!res.ok) throw new Error((await res.text()) || `Request failed (${res.status})`);
     return res.json();
   },
+  /** Sends binary data as it is, like a saved frame. */
+  async postBytes(path, blob) {
+    const res = await fetch(`/api${path}`, { method: "POST", headers: { "x-halo-token": token, "content-type": "application/octet-stream" }, body: blob });
+    if (!res.ok) throw new Error((await res.text()) || `Request failed (${res.status})`);
+    return null;
+  },
   /** A URL the <video> element can load directly; it can't send headers. */
   mediaUrl: (id) => `/api/media/${id}/file?token=${encodeURIComponent(token)}`,
   fontUrl: (id) => `/api/fonts/${id}/file?token=${encodeURIComponent(token)}`,

@@ -1,7 +1,7 @@
 // The export window: where to save, format, size, quality and captions, then progress and result.
 
 import { api } from "./api.js";
-import { buildAss, buildMask, buildSrt, buildVtt, usedFonts } from "./captions.js";
+import { buildAss, buildMask, buildSrt, buildVtt, sliceCaptions, usedFonts } from "./captions.js";
 
 const $ = (id) => document.getElementById(id);
 const EXTENSIONS = { h264: "mp4", h265: "mp4", prores: "mov", webm: "webm", srt: "srt", vtt: "vtt" };
@@ -59,6 +59,15 @@ export function createExporter({ store, getMedia, getPrefs, savePrefs, toast, ba
   const textOnly = () => what() === "captions" && TEXT_FORMATS.includes(format());
   function quality() { return form.querySelector("input[name=quality]:checked")?.value ?? "high"; }
   function ext() { return EXTENSIONS[format()]; }
+  /** The stretch to export, from the In and Out points when that's chosen; null for the whole video. */
+  function range() {
+    const r = store.doc?.range;
+    const media = getMedia();
+    if (!r || !media || form.querySelector("input[name=range]:checked")?.value !== "inout") return null;
+    const start = r.in ?? 0;
+    const end = Math.min(media.duration || Infinity, r.out ?? media.duration ?? Infinity);
+    return end - start >= 0.05 ? { start, end } : null;
+  }
   function outputPath() { return `${dir}\\${$("export-name").value.trim()}.${ext()}`; }
 
   function open() {
@@ -101,6 +110,12 @@ export function createExporter({ store, getMedia, getPrefs, savePrefs, toast, ba
     const preferred = String(prefs.maxSide ?? 0);
     size.value = options.some((o) => String(o.side) === preferred) ? preferred : "0";
 
+    const r = doc.range;
+    $("export-range-field").hidden = !r;
+    if (r) {
+      $("range-inout").checked = true;
+      $("range-inout-label").textContent = `In to Out · ${clock(r.in ?? 0)}–${clock(r.out ?? media.duration)}`;
+    }
     const hasCaptions = doc.captions.words.length > 0;
     $("what-captions").disabled = !hasCaptions;
     $("export-captions-field").hidden = !hasCaptions;
@@ -161,6 +176,8 @@ export function createExporter({ store, getMedia, getPrefs, savePrefs, toast, ba
         : notes[format()];
     const { w, h } = scaled(media, Number($("export-size").value));
     const parts = textOnly() ? ["Captions", FORMAT_NAMES[format()]] : [`${w} × ${h}`, FORMAT_NAMES[format()]];
+    const span = range();
+    if (span) parts.push(`${formatSeconds(Math.round(span.end - span.start))} from ${clock(span.start)}`);
     if (captions && !textOnly()) parts.push("captions only");
     else if (!$("export-captions-field").hidden && $("export-burn").checked) parts.push("captions");
     $("export-summary").textContent = parts.join(" · ");
@@ -217,24 +234,32 @@ export function createExporter({ store, getMedia, getPrefs, savePrefs, toast, ba
     if (textOnly()) return saveText(output, name);
     const burn = captionsOnly || (!$("export-captions-field").hidden && $("export-burn").checked);
     const srt = !captionsOnly && !$("export-captions-field").hidden && $("export-srt").checked;
+    const span = range();
     let grades = [];
     try {
       if (!captionsOnly) grades = await bakeGrades();
     } catch (err) {
       return showError(err.message);
     }
+    // A range exports from its In point, so everything timed is moved to start there.
+    if (span) {
+      grades = grades
+        .filter((g) => g.end > span.start && g.start < span.end)
+        .map((g) => ({ ...g, start: Math.max(0, g.start - span.start), end: Math.min(span.end, g.end) - span.start }));
+    }
+    const timed = span ? sliceCaptions(doc.captions, span.start, span.end) : doc.captions;
     if (!captionsOnly && doc.background.mode === "none" && !burn && !grades.length) {
       return showError("There's nothing to change yet. Add a background effect, a colour grade, or burn in captions.");
     }
     const size = scaled(media, Number($("export-size").value));
     // An overlay has no video under it to invert, so inverted captions come out as plain ones.
-    const cap = captionsOnly ? { ...doc.captions, style: { ...doc.captions.style, invert: false } } : doc.captions;
+    const cap = captionsOnly ? { ...timed, style: { ...timed.style, invert: false } } : timed;
     const body = {
       media: media.id,
       ...(captionsOnly ? { mode: "none" } : doc.background),
       captions: burn ? buildAss(cap, size.w, size.h, { fps: media.fps || 30 }) : null,
       caption_mask: burn ? buildMask(cap, size.w, size.h, { fps: media.fps || 30 }) : null,
-      srt: srt ? buildSrt(doc.captions) : null,
+      srt: srt ? buildSrt(timed) : null,
       fonts: burn ? usedFonts(doc.captions) : [],
       grades,
       captions_only: captionsOnly,
@@ -244,6 +269,8 @@ export function createExporter({ store, getMedia, getPrefs, savePrefs, toast, ba
       quality: quality(),
       // The engine caps the long side.
       max_side: Number($("export-size").value) ? Math.max(size.w, size.h) : null,
+      range_start: span?.start ?? null,
+      range_end: span?.end ?? null,
     };
     try {
       const { id } = await api.post("/jobs", body);
@@ -279,7 +306,9 @@ export function createExporter({ store, getMedia, getPrefs, savePrefs, toast, ba
   async function saveText(output, name) {
     const doc = store.doc;
     try {
-      await api.post("/files/text", { path: output, text: format() === "vtt" ? buildVtt(doc.captions) : buildSrt(doc.captions), overwrite });
+      const span = range();
+      const cap = span ? sliceCaptions(doc.captions, span.start, span.end) : doc.captions;
+      await api.post("/files/text", { path: output, text: format() === "vtt" ? buildVtt(cap) : buildSrt(cap), overwrite });
     } catch (err) {
       if (!/already exists/i.test(err.message)) return showError(err.message);
       overwrite = true;
@@ -368,6 +397,11 @@ export function createExporter({ store, getMedia, getPrefs, savePrefs, toast, ba
     /** Forget a finished export, e.g. when switching videos. */
     reset() { if (!running) finished = null; },
   };
+}
+
+/** m:ss.s, for the range's label. */
+function clock(t) {
+  return `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
 }
 
 function formatSeconds(s) {

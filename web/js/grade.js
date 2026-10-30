@@ -26,6 +26,9 @@ export const DEFAULT_LOOK = {
   contrast: 0,
   highlights: 0,
   shadows: 0,
+  /** The white and black points, like Lightroom's and Lumetri's Whites and Blacks: -1 to 1. */
+  whites: 0,
+  blacks: 0,
   fade: 0,
   temperature: 0,
   tint: 0,
@@ -42,10 +45,17 @@ export const DEFAULT_LOOK = {
   /** Per-colour hue, saturation and luminance, like Lightroom's HSL panel: null, or an object of
       bands (`HSL_BANDS`) to { h: degrees, s: -1..1, l: -1..1 }. */
   hsl: null,
+  /** Custom curves, like Resolve's and Lightroom's: null, or { master, red, green, blue }, each a
+      list of [input, output] points from 0 to 1 including both ends. Master moves all three channels. */
+  curves: null,
   /** An imported LUT, { id, name }, from Halo's LUT library. */
   lut: null,
   lutAmount: 1,
+  /** How much of the whole grade shows, 0 to 1, like a node's key output gain in Resolve. */
+  mix: 1,
 };
+
+export const CURVE_CHANNELS = ["master", "red", "green", "blue"];
 
 export const WHEELS = ["shadows", "midtones", "highlights"];
 
@@ -175,14 +185,66 @@ export function makeLook(partial = {}) {
     };
   }
   if (look.wheels && WHEELS.every((w) => !look.wheels[w]?.s && !look.wheels[w]?.l)) look.wheels = null;
+  if (look.curves && CURVE_CHANNELS.every((c) => isStraight(look.curves[c]))) look.curves = null;
   return look;
 }
 
 /** True when a look leaves the picture as it is. */
 export function isNeutral(look) {
   const l = makeLook(look);
-  const ignore = ["lutAmount", "filmAmount", "skinProtect"];
+  const ignore = ["lutAmount", "filmAmount", "skinProtect", "mix"];
   return Object.keys(DEFAULT_LOOK).every((k) => ignore.includes(k) || JSON.stringify(l[k]) === JSON.stringify(DEFAULT_LOOK[k]));
+}
+
+/* ---------- curves ---------- */
+
+/** True for a curve that leaves its channel alone: none, or a straight line from black to white. */
+export function isStraight(points) {
+  return !points || (points.length === 2 && points[0][0] === 0 && points[0][1] === 0 && points[1][0] === 1 && points[1][1] === 1);
+}
+
+/**
+ * A curve through `points` as a function from 0..1 to 0..1: a monotone cubic (Fritsch–Carlson), so
+ * it passes through every point without the overshoot a plain spline makes between close points.
+ * Sampled into a table, since grading calls it for every colour of every LUT.
+ */
+export function curveFn(points) {
+  const p = [...points].sort((a, b) => a[0] - b[0]);
+  const n = p.length;
+  const dx = [];
+  const m = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx.push(Math.max(1e-6, p[i + 1][0] - p[i][0]));
+    m.push((p[i + 1][1] - p[i][1]) / dx[i]);
+  }
+  const t = [m[0]];
+  for (let i = 1; i < n - 1; i++) t.push(m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2);
+  t.push(m[n - 2]);
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = t[i + 1] = 0; continue; }
+    const a = t[i] / m[i];
+    const b = t[i + 1] / m[i];
+    const h = a * a + b * b;
+    if (h > 9) { const k = 3 / Math.sqrt(h); t[i] = k * a * m[i]; t[i + 1] = k * b * m[i]; }
+  }
+  const at = (x) => {
+    if (x <= p[0][0]) return p[0][1];
+    if (x >= p[n - 1][0]) return p[n - 1][1];
+    let i = 0;
+    while (x > p[i + 1][0]) i++;
+    const s = (x - p[i][0]) / dx[i];
+    const s2 = s * s;
+    const s3 = s2 * s;
+    return (2 * s3 - 3 * s2 + 1) * p[i][1] + (s3 - 2 * s2 + s) * dx[i] * t[i] + (-2 * s3 + 3 * s2) * p[i + 1][1] + (s3 - s2) * dx[i] * t[i + 1];
+  };
+  const N = 1024;
+  const table = new Float32Array(N + 1);
+  for (let i = 0; i <= N; i++) table[i] = Math.min(1, Math.max(0, at(i / N)));
+  return (x) => {
+    const f = Math.min(1, Math.max(0, x)) * N;
+    const i = Math.min(N - 1, Math.floor(f));
+    return table[i] + (table[i + 1] - table[i]) * (f - i);
+  };
 }
 
 /* ---------- colour science ---------- */
@@ -417,6 +479,8 @@ function prepare(look, source = "rec709") {
   const A = 0.36; // how soft the film curve's toe and shoulder are, in log units
   const T0 = 0.002; // below this much light, crushed blacks roll off instead of clipping
   const shapesTone = contrast !== 1 || l.shadows || l.highlights || l.wheels || stock;
+  const curve = (c) => (l.curves && !isStraight(l.curves[c]) ? curveFn(l.curves[c]) : null);
+  const curves = l.curves ? { master: curve("master"), rgb: ["red", "green", "blue"].map(curve) } : null;
 
   return (rgb) => {
     // 1. Input transform, to light in Rec.709 primaries.
@@ -475,7 +539,15 @@ function prepare(look, source = "rec709") {
     // Output transform.
     if (decode) c = c.map(toneMap);
     c = fitGamut(c).map((v) => toGamma(clamp01(v)));
+    // Whites and blacks stretch or pull in the ends of the range, leaving the middle be.
+    if (l.whites) c = c.map((v) => clamp01(v * (1 + 0.25 * l.whites * v ** 3)));
+    if (l.blacks) c = c.map((v) => clamp01(v + 0.1 * l.blacks * (1 - v) ** 4));
     if (hasHsl) c = mixHsl(c, hsl).map(clamp01);
+    // Custom curves, on the picture as it's shown: master on every channel, then each channel's own.
+    if (curves) {
+      if (curves.master) c = c.map(curves.master);
+      c = c.map((v, i) => (curves.rgb[i] ? curves.rgb[i](v) : v));
+    }
     // Fade: a matte black, lifted most at black and hardly at all in the highlights.
     if (fade) c = c.map((v) => (v + fade * (1 - v) ** 2.5) * (1 - fade * 0.2));
     return c.map(clamp01);
@@ -516,7 +588,50 @@ export function gradeColor(rgb, look, lut, source = "rec709") {
     const graded = sampleLut(lut, out);
     out = out.map((c, i) => clamp01(c + (graded[i] - c) * look.lutAmount));
   }
-  return out;
+  return mixBack(out, rgb, look, source);
+}
+
+/** The ungraded picture: log footage transformed to normal contrast and colour, standard footage as it is. */
+const UNGRADED = {};
+function ungraded(rgb, source) {
+  return source === "rec709" ? rgb : gradeFn(UNGRADED, source)(rgb);
+}
+
+/** Blends a graded colour back toward the ungraded one by the look's mix. */
+function mixBack(out, rgb, look, source) {
+  const mix = look.mix ?? 1;
+  if (mix >= 1) return out;
+  const base = ungraded(rgb, source);
+  return out.map((c, i) => base[i] + (c - base[i]) * Math.max(0, mix));
+}
+
+/**
+ * The temperature and tint that turn `rgb`, a colour straight from the footage, neutral grey
+ * through the rest of `look`, for the white balance picker. Solved numerically (Gauss–Newton on
+ * the blue–yellow and green–magenta balance), so it holds whatever else the look does.
+ */
+export function neutralBalance(rgb, look, source = "rec709") {
+  const base = makeLook({ ...look, lut: null, mix: 1 });
+  const error = (t, n) => {
+    const [r, g, b] = prepare({ ...base, temperature: t, tint: n }, source)(rgb).map((v) => Math.max(1e-4, v));
+    return [Math.log(b / r), Math.log(g / Math.sqrt(r * b))];
+  };
+  const clamp = (v) => Math.min(1, Math.max(-1, v));
+  let t = base.temperature;
+  let n = base.tint;
+  for (let i = 0; i < 10; i++) {
+    const e = error(t, n);
+    if (Math.hypot(e[0], e[1]) < 1e-4) break;
+    const h = 1e-3;
+    const et = error(t + h, n);
+    const en = error(t, n + h);
+    const j = [[(et[0] - e[0]) / h, (en[0] - e[0]) / h], [(et[1] - e[1]) / h, (en[1] - e[1]) / h]];
+    const det = j[0][0] * j[1][1] - j[0][1] * j[1][0];
+    if (Math.abs(det) < 1e-9) break;
+    t = clamp(t - (j[1][1] * e[0] - j[0][1] * e[1]) / det);
+    n = clamp(n - (-j[1][0] * e[0] + j[0][0] * e[1]) / det);
+  }
+  return { temperature: Math.round(t * 100) / 100, tint: Math.round(n * 100) / 100 };
 }
 
 /** A look as a LUT: `BAKE_SIZE`³ RGB triples, red changing fastest (the .cube order). */
@@ -529,11 +644,13 @@ export function bake(look, lut, source = "rec709") {
   for (let b = 0; b < n; b++) {
     for (let g = 0; g < n; g++) {
       for (let r = 0; r < n; r++) {
-        let out = fn([r / (n - 1), g / (n - 1), b / (n - 1)]);
+        const rgb = [r / (n - 1), g / (n - 1), b / (n - 1)];
+        let out = fn(rgb);
         if (amount > 0) {
           const graded = sampleLut(lut, out);
           out = out.map((c, i) => clamp01(c + (graded[i] - c) * amount));
         }
+        out = mixBack(out, rgb, look, source);
         data[k++] = out[0];
         data[k++] = out[1];
         data[k++] = out[2];
@@ -543,8 +660,8 @@ export function bake(look, lut, source = "rec709") {
   return { size: n, data };
 }
 
-export function toCube({ size, data }) {
-  const rows = ["TITLE \"Halo grade\"", `LUT_3D_SIZE ${size}`, "DOMAIN_MIN 0 0 0", "DOMAIN_MAX 1 1 1"];
+export function toCube({ size, data }, title = "Halo grade") {
+  const rows = [`TITLE "${title.replace(/"/g, "'")}"`, `LUT_3D_SIZE ${size}`, "DOMAIN_MIN 0 0 0", "DOMAIN_MAX 1 1 1"];
   for (let i = 0; i < data.length; i += 3) rows.push(`${data[i].toFixed(6)} ${data[i + 1].toFixed(6)} ${data[i + 2].toFixed(6)}`);
   return rows.join("\n") + "\n";
 }
@@ -600,6 +717,8 @@ export function parseXmp(text, fallbackName) {
     contrast: pct("Contrast2012") ?? pct("Contrast"),
     highlights: pct("Highlights2012"),
     shadows: pct("Shadows2012"),
+    whites: pct("Whites2012"),
+    blacks: pct("Blacks2012"),
     saturation: pct("Saturation"),
     vibrance: pct("Vibrance"),
     temperature: pct("IncrementalTemperature")
@@ -622,6 +741,19 @@ export function parseXmp(text, fallbackName) {
     if (h || s || l) hsl[band] = { h: (h ?? 0) * 0.3, s: s ?? 0, l: l ?? 0 };
   }
   if (Object.keys(hsl).length) look.hsl = hsl;
+  // The point curves: a list of "input, output" pairs from 0 to 255 for each channel.
+  const curves = {};
+  for (const [suffix, channel] of [["", "master"], ["Red", "red"], ["Green", "green"], ["Blue", "blue"]]) {
+    const seq = doc.getElementsByTagName(`crs:ToneCurvePV2012${suffix}`)[0];
+    const points = [...(seq?.getElementsByTagName("rdf:li") ?? [])]
+      .map((li) => li.textContent.split(",").map((v) => Number(v) / 255))
+      .filter((p) => p.length === 2 && p.every((v) => Number.isFinite(v) && v >= 0 && v <= 1))
+      .sort((a, b) => a[0] - b[0]);
+    if (points.length && points[0][0] > 0) points.unshift([0, points[0][1]]);
+    if (points.length && points.at(-1)[0] < 1) points.push([1, points.at(-1)[1]]);
+    if (points.length >= 2 && !isStraight(points)) curves[channel] = points;
+  }
+  if (Object.keys(curves).length) look.curves = Object.fromEntries(CURVE_CHANNELS.map((c) => [c, curves[c] ?? [[0, 0], [1, 1]]]));
   for (const k of Object.keys(look)) if (look[k] === undefined) delete look[k];
   if (!Object.keys(look).length) throw new Error("That preset has no settings Halo can use.");
   if (look.exposure != null) look.exposure = Math.max(-3, Math.min(3, look.exposure));
@@ -668,6 +800,11 @@ export function sectionAt(grade, t) {
   return grade?.sections?.find((s) => t >= s.start && t < s.end) ?? null;
 }
 
+/** The look a section shows: its own, or none while it's bypassed (switched off, as Ctrl+D does in Resolve). */
+export function activeLook(section) {
+  return section && !section.bypass ? section.look : null;
+}
+
 /** How long a new graded section is when it isn't drawn out on the timeline. */
 export const CHUNK_SECS = 5;
 
@@ -697,8 +834,9 @@ export async function bakeSections(grade, duration = 0) {
   let at = 0;
   for (const s of grade?.sections ?? []) {
     if (s.end <= s.start) continue;
+    const look = activeLook(s) ?? makeLook();
     if (log && s.start > at) spans.push({ start: at, end: s.start, look: makeLook() });
-    if (log || !isNeutral(s.look)) spans.push({ start: s.start, end: s.end, look: s.look });
+    if (log || !isNeutral(look)) spans.push({ start: s.start, end: s.end, look });
     at = Math.max(at, s.end);
   }
   if (log && (duration || Infinity) > at) spans.push({ start: at, end: duration || 1e9, look: makeLook() });
@@ -720,13 +858,26 @@ precision highp sampler3D;
 uniform sampler2D frame;
 uniform sampler3D lut;
 uniform float size;
+uniform bool falseColor;
 in vec2 uv;
 out vec4 color;
+// Exposure bands by video level (IRE), the way ARRI's false colour marks them; the rest goes grey.
+vec3 bands(vec3 rgb) {
+  float ire = dot(rgb, vec3(0.2126, 0.7152, 0.0722)) * 100.0;
+  if (ire < 2.5) return vec3(0.55, 0.1, 0.75);   // crushed black
+  if (ire < 10.0) return vec3(0.15, 0.35, 0.95);  // near black
+  if (ire >= 99.0) return vec3(1.0, 0.1, 0.1);    // clipped
+  if (ire >= 94.0) return vec3(1.0, 0.9, 0.1);    // near clipping
+  if (ire >= 38.0 && ire < 44.0) return vec3(0.25, 0.8, 0.3); // mid grey, 18%
+  if (ire >= 52.0 && ire < 58.0) return vec3(1.0, 0.5, 0.7);  // a stop over grey: bright skin
+  return vec3(ire / 100.0 * 0.8 + 0.1);
+}
 void main() {
   vec4 c = texture(frame, uv);
   // Sample at texel centres, so 0 and 1 land on the LUT's first and last points.
   vec3 at = clamp(c.rgb, 0.0, 1.0) * ((size - 1.0) / size) + 0.5 / size;
-  color = vec4(texture(lut, at).rgb, c.a);
+  vec3 graded = texture(lut, at).rgb;
+  color = vec4(falseColor ? bands(graded) : graded, c.a);
 }`;
 
 /**
@@ -756,6 +907,7 @@ export function createGradePlayer(canvas) {
   gl.uniform1i(gl.getUniformLocation(program, "frame"), 0);
   gl.uniform1i(gl.getUniformLocation(program, "lut"), 1);
   const sizeAt = gl.getUniformLocation(program, "size");
+  const falseColorAt = gl.getUniformLocation(program, "falseColor");
 
   const frame = gl.createTexture();
   gl.activeTexture(gl.TEXTURE0);
@@ -803,7 +955,7 @@ export function createGradePlayer(canvas) {
      * Draws `source` (the video, or the processed still) through `look`. Returns false while the
      * look's LUT is still baking, so the caller can show the ungraded video meanwhile.
      */
-    draw(source, look, colorSource = "rec709") {
+    draw(source, look, colorSource = "rec709", { falseColor = false } = {}) {
       const lut = lutTexture(look, colorSource);
       if (lut instanceof Promise) return false;
       const w = source.videoWidth || source.naturalWidth;
@@ -820,6 +972,7 @@ export function createGradePlayer(canvas) {
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_3D, lut.texture);
       gl.uniform1f(sizeAt, lut.size);
+      gl.uniform1i(falseColorAt, falseColor ? 1 : 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       return true;
     },
