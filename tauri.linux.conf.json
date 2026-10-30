@@ -12,10 +12,14 @@
         "depends": [
           "gstreamer1.0-plugins-good",
           "gstreamer1.0-libav"
-        ]
+        ],
+        "desktopTemplate": "packaging/linux/halo.desktop"
       },
       "appimage": {
         "bundleMediaFramework": true
+      },
+      "rpm": {
+        "desktopTemplate": "packaging/linux/halo.desktop"
       }
     }
   }

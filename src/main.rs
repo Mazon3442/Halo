@@ -140,6 +140,9 @@ fn main() {
             };
             let web = app.path().resolve("web", BaseDirectory::Resource)?;
             let data = app.path().app_data_dir()?;
+            let cache = app.path().app_cache_dir()?;
+            clear_old_work(&cache.join("work"));
+            let _ = WORK_DIR.set(cache.join("work").join(std::process::id().to_string()));
             let work = work_dir();
             // Caption burn-in reads fonts from next to the subtitle files.
             std::fs::create_dir_all(work.join("fonts"))?;
@@ -294,9 +297,28 @@ async fn check_for_update(app: tauri::AppHandle) {
     }
 }
 
-/// Scratch files (caption files for exports) only live as long as this app instance.
+/// Scratch files for this run of Halo (subtitles, LUTs and fonts for exports), removed when it quits.
+/// They live in the user's own cache folder: Linux's temp folder is shared by every user, and a
+/// folder one of them made there would lock the others out.
 fn work_dir() -> PathBuf {
-    std::env::temp_dir().join("halo").join(std::process::id().to_string())
+    WORK_DIR.get().cloned().unwrap_or_else(|| std::env::temp_dir().join("halo").join(std::process::id().to_string()))
+}
+
+static WORK_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Removes scratch folders a crashed run left behind. Only old ones, since another copy of Halo
+/// may be running and using its own.
+fn clear_old_work(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t.elapsed().is_ok_and(|age| age > std::time::Duration::from_secs(2 * 24 * 3600)));
+        if old {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 /// Starts the UI and API server on a free local port and returns its address.

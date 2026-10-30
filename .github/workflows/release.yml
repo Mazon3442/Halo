@@ -117,6 +117,7 @@ jobs:
           tar -xf ffmpeg.tar.xz "$name/bin/ffmpeg" "$name/bin/ffprobe"
           mkdir -p ffmpeg
           mv "$name/bin/ffmpeg" "$name/bin/ffprobe" ffmpeg/
+          chmod 755 ffmpeg/ffmpeg ffmpeg/ffprobe
           rm -rf ffmpeg.tar.xz "$name"
           packaging/check-ffmpeg.sh ffmpeg/ffmpeg
 
