@@ -72,6 +72,8 @@ export class Timeline {
   #trackKey = null;
   /** Copied captions, for pasting at the playhead or onto a track. */
   #clipboard = null;
+  /** The caption being typed into: its text field and first word's id, kept across redraws. */
+  #editing = null;
 
   constructor({ store, video, toast, onSelectionChange, onSeek, onGradeSelect }) {
     this.store = store;
@@ -377,7 +379,12 @@ export class Timeline {
     this.#renderMarkers();
     const cap = this.#captions;
     this.#renderTracks();
+    // A redraw while a caption's being typed into (the timeline refitting as a new track
+    // appears, say) moves its text field to the new block instead of ending the edit.
+    const editing = this.#editing;
+    if (editing) editing.moving = true;
     for (const row of this.#rows.values()) row.replaceChildren();
+    if (editing) editing.moving = false;
     if (!cap || !this.#media) { this.#lines = []; this.#status(); return; }
     const { words } = cap;
     this.#lines = groupLines(words, cap.perLine);
@@ -475,6 +482,17 @@ export class Timeline {
       }
       row.append(el);
     });
+    if (editing && this.#editing === editing) {
+      const k = this.#lines.findIndex((l) => words[l.from].id === editing.id);
+      const el = this.tracksBox.querySelector(`.tl-clip[data-k="${k}"]`);
+      if (el) {
+        el.replaceChildren(editing.input);
+        el.classList.add("editing");
+        editing.input.focus({ preventScroll: true });
+      } else {
+        this.#editing = null;
+      }
+    }
     this.#status();
   }
 
@@ -524,15 +542,197 @@ export class Timeline {
    * Splits at the playhead: the selected captions under it, or else every caption under it on
    * tracks that aren't locked, as Ctrl+K cuts through all targeted tracks in Premiere.
    */
-  splitAtPlayhead() {
+  splitAtPlayhead({ all = false } = {}) {
     const t = this.video.currentTime;
     const words = this.#captions?.words ?? [];
-    const under = this.#lines.filter((l) => t > words[l.from].start && t < words[l.to - 1].end && !this.#isLocked(trackOf(words[l.from])));
+    const under = this.#underPlayhead(t);
     if (!under.length) return this.toast("Move the playhead over a caption to split it.");
-    const chosen = under.filter((l) => this.selection.has(words[l.from].id));
+    const chosen = all ? [] : under.filter((l) => this.selection.has(words[l.from].id));
     let split = 0;
     this.#commit((c) => { for (const line of chosen.length ? chosen : under) if (splitLine(c, line, t)) split++; });
     if (!split) this.toast("That caption is one word, so there's nothing to split.");
+  }
+
+  /** Captions under the playhead on tracks that aren't locked. */
+  #underPlayhead(t = this.video.currentTime) {
+    const words = this.#captions?.words ?? [];
+    return this.#lines.filter((l) => t > words[l.from].start && t < words[l.to - 1].end && !this.#isLocked(trackOf(words[l.from])));
+  }
+
+  /** The captions keyboard trims work on: the selected ones, else those under the playhead. */
+  #trimTargets(t) {
+    const words = this.#captions?.words ?? [];
+    const chosen = this.#selectedLines().filter((l) => !this.#isLocked(trackOf(words[l.from])));
+    return chosen.length ? chosen : this.#underPlayhead(t);
+  }
+
+  /** A line's neighbours on its own track, and the free time either side of it. */
+  #neighbours(line) {
+    const words = this.#captions.words;
+    const k = this.#lines.indexOf(line);
+    const track = trackOf(words[line.from]);
+    const near = (j) => (this.#lines[j] && trackOf(words[this.#lines[j].from]) === track ? this.#lines[j] : null);
+    const prev = near(k - 1);
+    const next = near(k + 1);
+    return { prev, next, lo: prev ? words[prev.to - 1].end : 0, hi: next ? words[next.from].start : this.#duration };
+  }
+
+  /** Applies new [start, end] times to lines, rescaling their words, as one undo step. */
+  #retime(plan, coalesce) {
+    if (!plan.size) return false;
+    this.#commit((c) => { for (const { line, start, end } of plan.values()) retimeLine(c, line, start, end); }, coalesce);
+    return true;
+  }
+
+  /**
+   * Moves the start or end of captions to the playhead, as Q and W do in Premiere and Shift+[ and
+   * Shift+] in Resolve: shorter when the playhead's inside, longer into free time when it's out.
+   * Nothing later moves, since the video under the captions doesn't change.
+   */
+  trimToPlayhead(side) {
+    const t = this.video.currentTime;
+    const lines = this.#trimTargets(t);
+    if (!lines.length) return this.toast("Select a caption, or move the playhead over one, to trim it.");
+    const words = this.#captions.words;
+    const plan = new Map();
+    for (const line of lines) {
+      const min = (line.to - line.from) * MIN_WORD;
+      const start = words[line.from].start;
+      const end = words[line.to - 1].end;
+      const { lo, hi } = this.#neighbours(line);
+      const at = side === "start" ? Math.max(lo, Math.min(t, end - min)) : Math.min(hi, Math.max(t, start + min));
+      if (Math.abs(at - (side === "start" ? start : end)) > 1e-4) {
+        plan.set(line.from, { line, start: side === "start" ? at : start, end: side === "end" ? at : end });
+      }
+    }
+    if (!this.#retime(plan)) this.toast("There's no room to trim that way.");
+  }
+
+  /**
+   * Moves the edge nearest the playhead there, like Premiere's Extend Edit (E). Where a caption
+   * meets the next one, both move (a roll edit), so the cut between them lands on the playhead.
+   * Without a selection it takes the nearest caption edge on any unlocked track.
+   */
+  extendToPlayhead() {
+    const t = this.video.currentTime;
+    const words = this.#captions?.words ?? [];
+    const open = this.#lines.filter((l) => !this.#isLocked(trackOf(words[l.from])));
+    let picks = this.#selectedLines().filter((l) => open.includes(l))
+      .map((line) => ({ line, side: Math.abs(t - words[line.from].start) <= Math.abs(t - words[line.to - 1].end) ? "start" : "end" }));
+    if (!picks.length) {
+      let best = null;
+      for (const line of open) {
+        for (const side of ["start", "end"]) {
+          const d = Math.abs(t - (side === "start" ? words[line.from].start : words[line.to - 1].end));
+          if (!best || d < best.d) best = { line, side, d };
+        }
+      }
+      if (!best) return this.toast("There are no captions to extend.");
+      picks = [best];
+    }
+    const touch = 0.5 / this.#fps;
+    const plan = new Map();
+    const span = (line) => plan.get(line.from) ?? { line, start: words[line.from].start, end: words[line.to - 1].end };
+    for (const { line, side } of picks) {
+      const { prev, next, lo, hi } = this.#neighbours(line);
+      const own = span(line);
+      const min = (l) => (l.to - l.from) * MIN_WORD;
+      if (side === "start") {
+        const roll = prev && own.start - words[prev.to - 1].end < touch;
+        const at = Math.max(roll ? words[prev.from].start + min(prev) : lo, Math.min(t, own.end - min(line)));
+        plan.set(line.from, { ...own, start: at });
+        if (roll) plan.set(prev.from, { ...span(prev), end: at });
+      } else {
+        const roll = next && words[next.from].start - own.end < touch;
+        const at = Math.min(roll ? words[next.to - 1].end - min(next) : hi, Math.max(t, own.start + min(line)));
+        plan.set(line.from, { ...own, end: at });
+        if (roll) plan.set(next.from, { ...span(next), start: at });
+      }
+    }
+    for (const [k, p] of plan) if (Math.abs(p.start - words[p.line.from].start) < 1e-4 && Math.abs(p.end - words[p.line.to - 1].end) < 1e-4) plan.delete(k);
+    this.#retime(plan);
+  }
+
+  /** Lengthens (or with a negative count shortens) the selected captions' ends by `frames` frames. */
+  trimEnd(frames) {
+    const lines = this.#selectedLines().filter((l) => !this.#isLocked(this.#lineTrack(l)));
+    if (!lines.length) return this.toast("Select captions to trim.");
+    const words = this.#captions.words;
+    const plan = new Map();
+    for (const line of lines) {
+      const start = words[line.from].start;
+      const end = words[line.to - 1].end;
+      const { hi } = this.#neighbours(line);
+      const at = Math.min(hi, Math.max(start + (line.to - line.from) * MIN_WORD, end + frames / this.#fps));
+      if (Math.abs(at - end) > 1e-4) plan.set(line.from, { line, start, end: at });
+    }
+    this.#retime(plan, "trim-end");
+  }
+
+  /** Selects the captions under the playhead, like D in Premiere. */
+  selectAtPlayhead() {
+    const words = this.#captions?.words ?? [];
+    const ids = this.#underPlayhead().map((l) => words[l.from].id);
+    if (!ids.length) return this.toast("There's no caption under the playhead.");
+    this.select(ids);
+  }
+
+  /**
+   * Selects the next or previous caption on the selected caption's track (C1 when nothing's
+   * selected) and returns its start, for stepping through captions one at a time.
+   */
+  selectStep(dir) {
+    const words = this.#captions?.words ?? [];
+    const current = this.#selectedLines();
+    const track = current.length ? this.#lineTrack(current[0]) : this.#tracks()[0]?.id;
+    const mine = this.#lines.filter((l) => trackOf(words[l.from]) === track);
+    if (!mine.length) return null;
+    let k;
+    if (current.length) {
+      k = mine.indexOf(dir > 0 ? current.at(-1) : current[0]) + dir;
+    } else {
+      const t = this.video.currentTime;
+      k = dir > 0 ? mine.findIndex((l) => words[l.from].start > t - 1e-3) : mine.findLastIndex((l) => words[l.from].start < t - 1e-3);
+    }
+    const line = mine[k];
+    if (!line) return null;
+    this.select([words[line.from].id]);
+    this.#scrollTo(words[line.from].start);
+    return words[line.from].start;
+  }
+
+  /** The span of the selected captions, or else of those under the playhead, for Mark Clip (X). */
+  clipSpan() {
+    const words = this.#captions?.words ?? [];
+    const lines = this.#selectedLines().length ? this.#selectedLines() : this.#underPlayhead();
+    if (!lines.length) return null;
+    return { start: Math.min(...lines.map((l) => words[l.from].start)), end: Math.max(...lines.map((l) => words[l.to - 1].end)) };
+  }
+
+  /** Gives the selected captions the style of the first copied caption, like Paste Attributes in Premiere. */
+  pasteStyle() {
+    const style = this.#clipboard?.lines[0]?.override;
+    const lines = this.#selectedLines().filter((l) => !this.#isLocked(this.#lineTrack(l)));
+    if (!this.#clipboard) return this.toast("Copy a caption first (Ctrl+C), then select the captions to give its style.");
+    if (!lines.length) return this.toast("Select the captions to give the copied style.");
+    this.#commit((c) => {
+      c.overrides ??= {};
+      for (const line of lines) {
+        const group = lockLine(c, line);
+        if (style) c.overrides[group] = structuredClone(style);
+        else delete c.overrides[group];
+      }
+    });
+    this.toast(lines.length === 1 ? "Pasted the style onto 1 caption." : `Pasted the style onto ${lines.length} captions.`);
+  }
+
+  /** Opens the selected caption's text for typing, as Enter or F2 does. */
+  editSelected() {
+    const words = this.#captions?.words ?? [];
+    const k = this.#lines.findIndex((l) => this.selection.has(words[l.from].id));
+    if (k < 0) return false;
+    this.editText(k);
+    return true;
   }
 
   mergeSelected() {
@@ -708,13 +908,19 @@ export class Timeline {
     el.classList.add("editing");
     input.focus();
     input.select();
+    const editing = { input, id: words[line.from].id, moving: false };
+    this.#editing = editing;
     let done = false;
     const finish = (save) => {
       if (done) return;
       done = true;
+      this.#editing = null;
       const text = input.value.trim();
-      if (save && text && text !== words.slice(line.from, line.to).map((w) => w.text).join(" ")) {
-        this.#commit((c) => editLine(c, line, text));
+      // Found again by its first word, in case the lines were regrouped while typing.
+      const now = this.#lines.find((l) => this.#captions.words[l.from]?.id === editing.id) ?? line;
+      const old = this.#captions.words.slice(now.from, now.to).map((w) => w.text).join(" ");
+      if (save && text && text !== old) {
+        this.#commit((c) => editLine(c, now, text));
       } else {
         this.renderBlocks();
       }
@@ -724,7 +930,7 @@ export class Timeline {
       if (ev.key === "Enter") finish(true);
       if (ev.key === "Escape") finish(false);
     });
-    input.addEventListener("blur", () => finish(true));
+    input.addEventListener("blur", () => { if (!editing.moving) finish(true); });
     input.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   }
 
@@ -1245,9 +1451,12 @@ export class Timeline {
       { label: "Cut", icon: "#i-scissors", hint: "Ctrl+X", action: () => this.cutSelected() },
       { label: "Copy", icon: "#i-copy", hint: "Ctrl+C", action: () => this.copySelected() },
       { label: "Paste at playhead", icon: "#i-paste", hint: "Ctrl+V", disabled: !this.#clipboard, action: () => this.paste() },
+      { label: "Paste style", icon: "#i-paste", hint: "Ctrl+Alt+V", disabled: !this.#clipboard, action: () => this.pasteStyle() },
       { label: "Duplicate onto the track above", icon: "#i-layers", hint: "Ctrl+D", action: () => this.duplicateSelected() },
       { sep: true },
       { label: "Split at playhead", icon: "#i-scissors", hint: "Ctrl+K", disabled: !splittable, action: () => this.splitAtPlayhead() },
+      { label: "Trim start to playhead", icon: "#i-in", hint: "Q", action: () => this.trimToPlayhead("start") },
+      { label: "Trim end to playhead", icon: "#i-out", hint: "W", action: () => this.trimToPlayhead("end") },
       { label: "Merge", icon: "#i-merge", hint: "Shift+M", disabled: n < 2, action: () => this.mergeSelected() },
       { label: "Show at the top", icon: "#i-arrow-up", disabled: !n, action: () => this.place("top") },
       { label: "Show at the bottom", icon: "#i-arrow-down", disabled: !n, action: () => this.place("bottom") },
@@ -1675,6 +1884,9 @@ export class Timeline {
       { label: "Use the grade before this one", icon: "#i-prev", disabled: !selected || this.#sections[0]?.id === selected.id, action: () => this.onGradeMatchPrevious?.(selected.id) },
       { sep: true },
       { label: "Split at playhead", icon: "#i-scissors", hint: "Ctrl+K", disabled: !splittable, action: () => this.onGradeSplit?.() },
+      { label: "Trim start to playhead", icon: "#i-in", hint: "[", disabled: !selected, action: () => this.onGradeTrim?.("start") },
+      { label: "Trim end to playhead", icon: "#i-out", hint: "]", disabled: !selected, action: () => this.onGradeTrim?.("end") },
+      { label: "Export as LUT…", icon: "#i-download", disabled: !selected, action: () => this.onGradeExportLut?.() },
       { label: "Reset look", icon: "#i-undo", disabled: !selected, action: () => this.onGradeReset?.(selected.id) },
       { label: "Remove grade", icon: "#i-trash", hint: "Del", danger: true, disabled: !selected, action: () => this.onGradeDelete?.(selected.id) },
     ]);

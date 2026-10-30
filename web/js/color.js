@@ -5,15 +5,16 @@
 // trimmed; the player draws them live.
 
 import {
-  CHUNK_SECS, CURVE_CHANNELS, DEFAULT_LOOK, FILM_STOCKS, HSL_BANDS, LOOKS, SOURCES, WHEELS, activeLook, createGradePlayer, curveFn,
-  freeSpan, gradeColor, importLut, isNeutral, isStraight, loadLut, makeLook, needsTransform, neutralBalance, paintFrame, parseXmp,
-  sectionAt,
+  CHUNK_SECS, CURVE_CHANNELS, DEFAULT_LOOK, FILM_STOCKS, HSL_BANDS, LOOKS, SOURCES, WHEELS, activeLook, bakeLook, createGradePlayer,
+  curveFn, freeSpan, gradeColor, importLut, isNeutral, isStraight, loadLut, makeLook, needsTransform, neutralBalance, paintFrame,
+  parseXmp, sectionAt, toCube,
 } from "./grade.js";
+import { api } from "./api.js";
 import { createScopes } from "./scopes.js";
 import { editableValue } from "./scrub.js";
 
 const $ = (id) => document.getElementById(id);
-const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "fade", "temperature", "tint", "saturation", "vibrance", "lutAmount", "filmAmount", "skinProtect", "mix"];
+const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "blacks", "fade", "temperature", "tint", "saturation", "vibrance", "lutAmount", "filmAmount", "skinProtect", "mix"];
 const CURVE_COLORS = { master: "#e9eaec", red: "#ff6b6b", green: "#5fd38d", blue: "#6aa8ff" };
 const BAND_COLORS = { red: "#ff4d4d", orange: "#ff9a3c", yellow: "#f5d63b", green: "#4cd964", aqua: "#3fd4d4", blue: "#4d8dff", purple: "#9b6bff", magenta: "#ff5ad1" };
 /** A grade copied with Ctrl+C on the Color tab, kept across videos for this session. */
@@ -24,12 +25,13 @@ const SOURCE_HINTS = {
   rec709: "Phones and cameras record this unless you chose a log profile.",
   log: "Log footage looks flat and grey. Halo converts it from the camera's log curve and color gamut to normal contrast and color before grading, like a color space transform in Resolve, across the whole video.",
 };
+const HDR_NAMES = { hlg: "HDR (HLG)", pq: "HDR10 (PQ)" };
 
 function fileStem(name) {
   return name.replace(/\.[^.]+$/, "");
 }
 
-export function createColorPanel({ store, timeline, video, toast, getPrefs, savePrefs, isComparing }) {
+export function createColorPanel({ store, timeline, video, toast, getPrefs, savePrefs, isComparing, getMedia = () => null }) {
   /** The section the panel edits: the one selected on the timeline. */
   function current(doc = store.doc) {
     const id = timeline.gradeSelection;
@@ -86,7 +88,13 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     const s = current();
     const source = doc.grade.source ?? "rec709";
     $("grade-source").value = source;
-    $("grade-source-hint").textContent = SOURCE_HINTS[source === "rec709" ? "rec709" : "log"];
+    const hdr = getMedia()?.hdr;
+    $("grade-source-hint").textContent = !hdr
+      ? SOURCE_HINTS[source === "rec709" ? "rec709" : "log"]
+      : source === "rec709"
+        ? `This video is ${HDR_NAMES[hdr] ?? "HDR"}, as phones record by default. Halo shows and exports it in standard range with HDR's reference white as white, the way browsers and most apps show HDR on an ordinary screen. Highlights brighter than that clip, so check them with false colour (Alt+F).`
+        : `This video is ${HDR_NAMES[hdr] ?? "HDR"}, not log. It's already converted to standard range, so choose Rec.709 / standard here or the colours will be wrong.`;
+    $("grade-source-hint").classList.toggle("warn", !!hdr && source !== "rec709");
     $("color-dot").hidden = !needsTransform(doc.grade) && !sections.some((x) => !isNeutral(x.look));
     $("grade-editor").hidden = !s;
     $("grade-tools").hidden = !s;
@@ -618,6 +626,85 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     render();
   }
 
+  /** The section keyboard trims work on: the selected one, else the one under the playhead. */
+  function trimTarget(t) {
+    return current() ?? sectionAt(store.doc.grade, t) ?? null;
+  }
+
+  /**
+   * Moves the start or end of a section to the playhead, as [ and ] (or Q and W) do on the
+   * timeline: shorter if the playhead's inside it, longer into free time if it's outside.
+   */
+  function trimToPlayhead(side) {
+    const t = video.currentTime;
+    const s = trimTarget(t);
+    if (!s) return toast("Select a graded section, or move the playhead into one, to trim it.");
+    const list = store.doc.grade.sections;
+    const k = list.findIndex((x) => x.id === s.id);
+    const lo = list[k - 1]?.end ?? 0;
+    const hi = list[k + 1]?.start ?? (video.duration || s.end);
+    const at = side === "start" ? Math.max(lo, Math.min(t, s.end - 0.1)) : Math.min(hi, Math.max(t, s.start + 0.1));
+    if (Math.abs(at - (side === "start" ? s.start : s.end)) < 1e-4) return;
+    timeline.selectGrade(s.id);
+    store.update((d) => {
+      const x = d.grade.sections.find((g) => g.id === s.id);
+      if (x) x[side] = at;
+    });
+  }
+
+  /**
+   * Moves the selected section's edge nearest the playhead to it. Where it meets the next section,
+   * both move, a roll edit, so the cut between two grades lands on the playhead.
+   */
+  function rollToPlayhead() {
+    const t = video.currentTime;
+    const s = trimTarget(t);
+    if (!s) return toast("Select a graded section to move its nearest edge to the playhead.");
+    const list = store.doc.grade.sections;
+    const k = list.findIndex((x) => x.id === s.id);
+    const side = Math.abs(t - s.start) <= Math.abs(t - s.end) ? "start" : "end";
+    const other = side === "start" ? list[k - 1] : list[k + 1];
+    const touching = other && Math.abs((side === "start" ? other.end : other.start) - s[side]) < 1e-3;
+    const lo = side === "start" ? (touching ? other.start + 0.1 : other?.end ?? 0) : s.start + 0.1;
+    const hi = side === "start" ? s.end - 0.1 : touching ? other.end - 0.1 : other?.start ?? (video.duration || s.end);
+    const at = Math.max(lo, Math.min(hi, t));
+    store.update((d) => {
+      const x = d.grade.sections.find((g) => g.id === s.id);
+      if (!x) return;
+      x[side] = at;
+      const y = touching && d.grade.sections.find((g) => g.id === other.id);
+      if (y) y[side === "start" ? "end" : "start"] = at;
+    });
+  }
+
+  /** Saves the selected section's grade as a .cube, for Premiere, Resolve, Final Cut, a camera monitor... */
+  async function exportLut() {
+    const s = current();
+    if (!s) return toast("Select a graded section to export its grade as a LUT.");
+    const name = s.name && s.name !== "Graded" ? s.name : "Halo grade";
+    const source = store.doc.grade.source ?? "rec709";
+    try {
+      const { path } = await api.post("/dialog/save", {
+        file_name: `${name.replace(/[\\/:*?"<>|]/g, "")}.cube`,
+        extension: "cube",
+        directory: getPrefs().lutDir ?? null,
+        title: "Export LUT",
+      });
+      if (!path) return;
+      const text = toCube(await bakeLook(activeLook(s) ?? makeLook(), source), name);
+      await api.post("/files/text", { path, text, overwrite: true });
+      const prefs = getPrefs();
+      prefs.lutDir = path.replace(/[\\/][^\\/]*$/, "");
+      savePrefs();
+      toast(source === "rec709"
+        ? `Saved “${name}” as a LUT.`
+        : `Saved “${name}” as a LUT. It includes the conversion from log, so put it on the original log clip.`);
+    } catch (err) {
+      toast(`Couldn't save the LUT: ${err.message}`);
+    }
+  }
+  $("grade-export-lut").addEventListener("click", exportLut);
+
   function deleteSection(id = null) {
     const s = id != null ? store.doc.grade.sections.find((x) => x.id === id) : current();
     if (!s) return;
@@ -643,6 +730,8 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
   timeline.onGradeSplit = splitAtPlayhead;
   timeline.onGradeDelete = deleteSection;
   timeline.onGradeReset = resetSection;
+  timeline.onGradeTrim = (side) => trimToPlayhead(side);
+  timeline.onGradeExportLut = () => exportLut();
 
   for (const key of SLIDERS) {
     const el = $(`grade-${key}`);
@@ -915,9 +1004,20 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     return needsTransform(doc.grade) ? TRANSFORM_ONLY : null;
   }
 
+  /** False colour, for judging exposure: a view of the graded picture, never exported. */
+  let falseColor = false;
+  function setFalseColor(on) {
+    falseColor = !!on;
+    drawn = "";
+    $("false-color-toggle")?.setAttribute("aria-pressed", String(falseColor));
+    $("false-color-toggle")?.classList.toggle("primary", falseColor);
+    $("false-color-key").hidden = !falseColor;
+  }
+  $("false-color-toggle")?.addEventListener("click", () => setFalseColor(!falseColor));
+
   function draw() {
     const doc = store.doc;
-    const look = doc && player && !isComparing() ? lookAt(doc, video.currentTime) : null;
+    const look = doc && player && !isComparing() ? lookAt(doc, video.currentTime) ?? (falseColor ? TRANSFORM_ONLY : null) : null;
     if (!look || !video.videoWidth) {
       layer.hidden = true;
       drawn = "";
@@ -926,9 +1026,9 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     const colorSource = doc.grade.source ?? "rec709";
     const effect = $("effect");
     const source = !effect.hidden && effect.complete && effect.naturalWidth ? effect : video;
-    const key = `${video.currentTime}|${colorSource}|${JSON.stringify(look)}|${source === video ? "v" : effect.src}`;
+    const key = `${video.currentTime}|${colorSource}|${falseColor}|${JSON.stringify(look)}|${source === video ? "v" : effect.src}`;
     if (key === drawn && video.paused) return;
-    if (player.draw(source, look, colorSource)) {
+    if (player.draw(source, look, colorSource, { falseColor })) {
       drawn = key;
       layer.hidden = false;
     } else {
@@ -988,13 +1088,18 @@ export function createColorPanel({ store, timeline, video, toast, getPrefs, save
     pasteGrade,
     applyPrevious,
     toggleWipe: () => setWipe(wipe == null),
+    toggleFalseColor: () => setFalseColor(!falseColor),
+    trimToPlayhead,
+    rollToPlayhead,
+    exportLut,
     toggleScopes: () => setScopes(scopeOverlay.hidden),
     setScopes,
     /** Called when the Color tab opens or closes, so scopes only appear where they belong. */
     setActive(on) {
       scopeToggle.hidden = !on;
       $("wipe-toggle").hidden = !on;
-      if (!on) { setScopes(false); setWipe(false); }
+      $("false-color-toggle").hidden = !on;
+      if (!on) { setScopes(false); setWipe(false); setFalseColor(false); }
     },
   };
 }

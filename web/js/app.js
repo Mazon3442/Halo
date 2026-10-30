@@ -114,7 +114,7 @@ const timeline = new Timeline({
   onGradeSelect: (id) => { if (id != null && tab !== "color") setTab("color"); else color.render(); },
 });
 const inspector = createInspector({ store, timeline, video, toast });
-const color = createColorPanel({ store, timeline, video, toast, getPrefs: () => prefs, savePrefs, isComparing: () => comparing });
+const color = createColorPanel({ store, timeline, video, toast, getPrefs: () => prefs, savePrefs, isComparing: () => comparing, getMedia: () => media });
 timeline.onSplitRequest = () => splitAtPlayhead();
 
 /* ---------- start screen ---------- */
@@ -528,7 +528,46 @@ function tick() {
 
 function togglePlay() {
   if (!media) return;
+  if (reverse) { stopReverse(); return; }
   if (video.paused) { setRate(1); startPlayback(); } else video.pause();
+}
+
+/* ---------- J: shuttling backwards ---------- */
+
+// The player can't play backwards, so J steps the playhead back in time with the clock, a seek
+// at a time, at 1×, 2×, 4× and 8× with each press, as J does in Premiere and Resolve.
+let reverse = 0;
+let reverseClock = 0;
+let reverseTarget = 0;
+
+function shuttleBack() {
+  if (!media) return;
+  video.pause();
+  if (!reverse) {
+    reverseClock = performance.now();
+    reverseTarget = video.currentTime;
+    requestAnimationFrame(reverseTick);
+  }
+  reverse = reverse ? Math.min(8, reverse * 2) : 1;
+  $("rate-badge").hidden = false;
+  $("rate-badge").textContent = `−${reverse}×`;
+}
+
+function stopReverse() {
+  if (!reverse) return;
+  reverse = 0;
+  setRate(video.playbackRate);
+}
+
+function reverseTick(now) {
+  if (!reverse) return;
+  reverseTarget -= ((now - reverseClock) / 1000) * reverse;
+  reverseClock = now;
+  if (reverseTarget <= 0) { seekTo(0); stopReverse(); return; }
+  // One seek at a time; a slow decoder shows fewer frames rather than falling behind.
+  if (!video.seeking) seekTo(reverseTarget);
+  updateTime();
+  requestAnimationFrame(reverseTick);
 }
 
 /* ---------- In and Out, looping, playback rate ---------- */
@@ -776,6 +815,7 @@ function seekTo(t) {
 }
 
 function stepFrames(n) {
+  stopReverse();
   video.pause();
   seekTo(video.currentTime + n / (media?.fps || 30));
 }
@@ -1230,10 +1270,40 @@ for (const dlg of document.querySelectorAll("dialog")) {
 }
 
 /** Splits whatever the active tab edits: a colour section on the Color tab, else a caption. */
-function splitAtPlayhead() {
+function splitAtPlayhead(opts) {
   if (tab === "color") color.splitAtPlayhead();
-  else timeline.splitAtPlayhead();
+  else timeline.splitAtPlayhead(opts);
 }
+
+/** Trims the start or end of what the active tab edits to the playhead. */
+function trimToPlayhead(side) {
+  if (tab === "color") color.trimToPlayhead(side);
+  else timeline.trimToPlayhead(side);
+}
+
+/** Selects what's under the playhead: the graded section on the Color tab, else the captions. */
+function selectAtPlayhead() {
+  if (tab !== "color") return timeline.selectAtPlayhead();
+  const t = video.currentTime;
+  const s = store.doc?.grade.sections.find((x) => t >= x.start && t < x.end);
+  if (s) timeline.selectGrade(s.id);
+  else toast("There's no graded section under the playhead.");
+}
+
+/** Sets In and Out around the selected captions (or graded section), or what's under the playhead, as X does in Premiere. */
+function markClip() {
+  const t = video.currentTime;
+  const grade = tab === "color"
+    ? store.doc?.grade.sections.find((x) => x.id === timeline.gradeSelection) ?? store.doc?.grade.sections.find((x) => t >= x.start && t < x.end)
+    : null;
+  const span = grade ?? (tab !== "color" ? timeline.clipSpan() : null);
+  if (!span) return toast(tab === "color" ? "Select a graded section to mark it." : "Select a caption, or move the playhead over one, to mark it.");
+  timeline.setRange("in", span.start);
+  timeline.setRange("out", span.end);
+  toast(`In ${timecode(span.start, media?.fps)}, Out ${timecode(span.end, media?.fps)}`);
+}
+
+let holdingK = false;
 
 document.addEventListener("keydown", (ev) => {
   if (document.querySelector("dialog[open]") || ev.defaultPrevented) return;
@@ -1249,7 +1319,17 @@ document.addEventListener("keydown", (ev) => {
   if (isTyping(ev.target)) return; // text fields keep their own undo and arrow keys
   if (ctrl && key === "z") { ev.preventDefault(); if (ev.shiftKey) store.redo(); else store.undo(); return; }
   if (ctrl && key === "y") { ev.preventDefault(); store.redo(); return; }
-  if (ctrl && key === "k") { ev.preventDefault(); splitAtPlayhead(); return; }
+  // Split: Ctrl+K as in Premiere (Shift: through every track), Ctrl+B and Ctrl+\ as in Resolve.
+  if (ctrl && (key === "k" || key === "b" || ev.code === "Backslash")) { ev.preventDefault(); splitAtPlayhead({ all: ev.shiftKey }); return; }
+  if (ctrl && ev.shiftKey && key === "a") { ev.preventDefault(); timeline.clearSelection(); return; }
+  if (ctrl && ev.altKey && key === "v") { ev.preventDefault(); if (tab !== "color") timeline.pasteStyle(); return; }
+  if (ctrl && !ev.altKey && (key === "arrowup" || key === "arrowdown")) {
+    // Step through captions one at a time, like the next and previous line keys in subtitle editors.
+    ev.preventDefault();
+    const at = timeline.selectStep(key === "arrowdown" ? 1 : -1);
+    if (at != null) { video.pause(); seekTo(at); }
+    return;
+  }
   if (ctrl && ev.shiftKey && key === "s") { ev.preventDefault(); if (tab === "color") color.toggleScopes(); return; }
   if (ctrl && ev.shiftKey && key === " ") { ev.preventDefault(); playInToOut(); return; }
   if (ctrl && key === "l") { ev.preventDefault(); setLoop(!loop); toast(loop ? "Loop on" : "Loop off"); return; }
@@ -1271,6 +1351,14 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   if (ev.altKey && key === "x") { ev.preventDefault(); timeline.clearRange(); return; }
+  if (ev.altKey && !ctrl && (key === "backspace" || key === "delete")) { ev.preventDefault(); if (tab !== "color") timeline.rippleDeleteSelected(); return; }
+  if (ev.altKey && !ctrl && key === "f") { ev.preventDefault(); if (tab === "color") color.toggleFalseColor(); return; }
+  if (ev.altKey && !ctrl && (ev.code === "Comma" || ev.code === "Period")) {
+    // Trim the selected captions' ends a frame at a time (five with Shift).
+    ev.preventDefault();
+    timeline.trimEnd((ev.code === "Comma" ? -1 : 1) * (ev.shiftKey ? 5 : 1));
+    return;
+  }
   if (ev.altKey && key === "m") { ev.preventDefault(); if (tab === "background") setMatteView(!matteView); return; }
   if (ev.shiftKey && (key === "arrowup" || key === "arrowdown")) {
     // Previous or next marker, as Shift+Up and Shift+Down do in Resolve.
@@ -1288,6 +1376,35 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   if (key === "escape") { if (document.body.classList.contains("viewer-max")) setMaximized(false); else timeline.clearSelection(); return; }
+  // Trimming. [ and ] (Shift too, as in Resolve) on every tab; Q and W as in Premiere, except
+  // that W stays the wipe on the Color tab.
+  if (ev.code === "BracketLeft" || ev.code === "BracketRight") { ev.preventDefault(); trimToPlayhead(ev.code === "BracketLeft" ? "start" : "end"); return; }
+  if (key === "q" && !ev.shiftKey) { trimToPlayhead("start"); return; }
+  if (key === "w" && !ev.shiftKey && tab !== "color") { trimToPlayhead("end"); return; }
+  if (key === "e" && !ev.shiftKey) { if (tab === "color") color.rollToPlayhead(); else timeline.extendToPlayhead(); return; }
+  if (key === "d" && !ev.shiftKey) { selectAtPlayhead(); return; }
+  if (key === "x" && !ev.shiftKey) { markClip(); return; }
+  if (key === "n" && !ev.shiftKey) { timeline.toggleSnapping(); return; }
+  if (key === "z" && ev.shiftKey) { timeline.fit(); return; }
+  if (ev.code === "Comma" || ev.code === "Period") {
+    // Nudge, as , and . do in Resolve and Final Cut.
+    ev.preventDefault();
+    timeline.nudge((ev.code === "Comma" ? -1 : 1) * (ev.shiftKey ? 5 : 1));
+    return;
+  }
+  if (key === "pageup" || key === "pagedown" || ev.code === "Semicolon" || ev.code === "Quote") {
+    // Previous and next edit: Page Up and Down as in Premiere, ; and ' as in Final Cut.
+    ev.preventDefault();
+    const at = timeline.editPoint(key === "pagedown" || ev.code === "Quote" ? 1 : -1);
+    if (at != null) { video.pause(); seekTo(at); }
+    return;
+  }
+  if ((key === "enter" || key === "f2") && !ev.shiftKey && !ev.target.closest?.("button, a, select, summary, [role=button], [role=menuitem]")) {
+    ev.preventDefault();
+    if (tab === "color") { if (timeline.gradeSelection != null) timeline.renameGrade(timeline.gradeSelection); }
+    else timeline.editSelected();
+    return;
+  }
   // Shortcuts that open a text field keep their own letter out of it.
   if (key === "m" && ev.shiftKey) { timeline.mergeSelected(); return; }
   if (key === "m") { ev.preventDefault(); timeline.addMarker(video.currentTime); return; }
@@ -1312,17 +1429,24 @@ document.addEventListener("keydown", (ev) => {
     const at = timeline.editPoint(key === "arrowdown" ? 1 : -1);
     if (at != null) { video.pause(); seekTo(at); }
   }
-  // J, K and L shuttle. The player can't play backwards, so J steps back a second instead.
+  // J, K and L shuttle; holding K, J and L step a frame at a time.
   else if (key === "l") {
-    if (video.paused) { setRate(1); startPlayback(); } else setRate(Math.min(8, video.playbackRate * 2));
+    if (holdingK) stepFrames(1);
+    else if (reverse) { stopReverse(); setRate(1); startPlayback(); }
+    else if (video.paused) { setRate(1); startPlayback(); } else setRate(Math.min(8, video.playbackRate * 2));
   }
-  else if (key === "k") { video.pause(); setRate(1); }
-  else if (key === "j") { video.pause(); seekTo(video.currentTime - 1); }
+  else if (key === "k") { holdingK = true; stopReverse(); video.pause(); setRate(1); }
+  else if (key === "j") { if (holdingK) stepFrames(-1); else shuttleBack(); }
   else if (key === "home") { ev.preventDefault(); seekTo(0); }
   else if (key === "end") { ev.preventDefault(); seekTo(video.duration || 0); }
   else if (key === "c" && !ev.repeat && (tab === "background" || tab === "color")) setComparing(true);
 });
-document.addEventListener("keyup", (ev) => { if (ev.key.toLowerCase() === "c" && comparing) setComparing(false); });
+document.addEventListener("keyup", (ev) => {
+  const key = ev.key.toLowerCase();
+  if (key === "c" && comparing) setComparing(false);
+  if (key === "k") holdingK = false;
+});
+window.addEventListener("blur", () => { holdingK = false; });
 
 // Save before the window closes.
 window.addEventListener("beforeunload", () => store.flush());

@@ -30,7 +30,7 @@
 | **20 caption styles** | Pop, Loud, Karaoke, Outline, Box, One word, Glow and more, each one a starting point for font, color, outline, shadow, box and animation. Save your own next to them, and drag any of them onto single captions on the timeline. |
 | **Easy Motion and plugins** | Caption animations come from plugins. The built-in Easy Motion gives each caption an in and an out (direction, style, distance, frames), extras (scale, rotation, 3D tilt, blur, tracking, fade), a hold effect (float, slow push, pulse, swing, shake) and motion blur, with 17 presets. Add your own plugins as .js files. |
 | **Clean up in one pass** | Remove filler words ("um", "uh", "like") across the whole video, fix a misheard name everywhere with find and replace, shift captions that run early or late, flag captions too fast to read, or import an SRT or WebVTT file you already have. |
-| **Color grading** | Graded the way a colorist works: log footage (Apple Log, S-Log3, V-Log, LogC3, Canon Log 3, D-Log) converted first, then grading in log with real white balance, pivoted contrast, shadow/midtone/highlight color wheels that keep skin tones clean, custom curves, an HSL mixer and print film emulation (Kodak 2383 and 2393, Fuji 3513, Vision3, bleach bypass, black and white). 16 looks built from those, previewed on your own frame. Grade the whole video or just a stretch of it, add a .cube LUT or a Lightroom preset, balance from a picked grey, copy grades between sections, bypass them, and check the result with a split wipe or on a waveform, RGB parade, vectorscope or histogram. |
+| **Color grading** | Graded the way a colorist works: log footage (Apple Log, S-Log3, V-Log, LogC3, Canon Log 3, D-Log) converted first, then grading in log with real white balance, pivoted contrast, shadow/midtone/highlight color wheels that keep skin tones clean, custom curves, an HSL mixer and print film emulation (Kodak 2383 and 2393, Fuji 3513, Vision3, bleach bypass, black and white). 16 looks built from those, previewed on your own frame. Whites and Blacks set the ends of the range. Grade the whole video or just a stretch of it, add a .cube LUT or a Lightroom preset (curves included), export any grade as a .cube LUT, balance from a picked grey, copy grades between sections, bypass them, and check the result with a split wipe, false colour, or a waveform, RGB parade, vectorscope or histogram. iPhone HDR (HLG) and HDR10 video export looking the way the preview shows it, and every export is encoded and tagged as Rec.709 so players all show the same colours. |
 | **A real timeline** | Stacked caption tracks, plus color, video and audio tracks with thumbnails, a waveform and snapping. Drag captions in time or between tracks, Alt-drag to copy, copy and paste, trim, split and merge, ripple delete, retime single words, lock and hide tracks, and draw color grades straight onto the track. Markers (which copy out as YouTube chapters) and In and Out points work as they do in Premiere and Resolve. |
 | **Exports that match the preview** | MP4 (H.264 or H.265, on NVENC when there is one), ProRes or WebM, with captions burned in or saved alongside as SRT. Export the whole video or just In to Out. Transparent backgrounds export as ProRes 4444 or WebM with alpha. Save any frame as a full-size PNG. |
 | **Projects that keep themselves** | Every video gets an autosaved project, so reopening it brings your edits back, on the tab and frame you left it at. Everything is undoable. |
@@ -113,7 +113,8 @@ Animation menu next time Halo starts. [docs/plugins.md](docs/plugins.md) explain
 **Color tab:** first, say what the footage was shot in. Log footage (Apple Log on iPhone, Sony S-Log3,
 Panasonic V-Log, ARRI LogC3, Canon Log 3, DJI D-Log) looks flat and grey. Halo converts it from the
 camera's log curve and gamut across the whole video before any grading, as a color space transform does
-in Resolve. Grades live on the Color track. Drag along an empty stretch of it to draw a grade of
+in Resolve. HDR video (HLG, which iPhones record by default, or HDR10) is shown and exported in standard
+range with HDR's reference white as white, so leave it on Rec.709 / standard. Grades live on the Color track. Drag along an empty stretch of it to draw a grade of
 that length, or double-click it (or press "Add a 5s grade at the playhead") for a five-second one;
 drag a grade or its edges to move it, and split it at the playhead. Each grade takes a look, light and
 color sliders, a print film emulation, three color wheels (shadows, midtones, highlights) with skin
@@ -121,11 +122,15 @@ protection, custom curves (master, red, green and blue, over the frame's histogr
 (hue, saturation and luminance per color, like Lightroom's), and optionally a LUT: import a .cube file
 from Premiere, Resolve, Final Cut or CapCut, or a Lightroom preset (.xmp). Pick neutral balances the
 color from something white or grey in the frame. Grade mix fades the whole grade up or down. Save a
-look you like to use it again. Copy a grade (Ctrl+C) and paste it onto another section (Ctrl+V), apply
+look you like to use it again, or Export LUT to save the grade as a .cube for Premiere, Resolve or a
+camera monitor (for log footage it includes the conversion, so it goes on the original clip). Copy a grade (Ctrl+C) and paste it onto another section (Ctrl+V), apply
 it to every section, or take the grade of the section before; double-click a section to name it.
 Ctrl+D bypasses the selected grade and Shift+D all of them, in the preview and the export. W splits the
 picture with a wipe you drag, the original on one side and the grade on the other. Scopes
-(Ctrl+Shift+S) show a waveform, RGB parade, vectorscope and histogram of the graded frame.
+(Ctrl+Shift+S) show a waveform, RGB parade, vectorscope and histogram of the graded frame, and false colour
+(Alt+F) paints exposure bands over the picture: crushed and near black, 18% grey, a stop over grey (bright
+skin), near clipping and clipped. [ and ] trim the selected grade to the playhead, and E moves its
+nearest edge there, rolling the cut with a grade it touches.
 
 **Timeline:** caption, color, video and audio tracks with a ruler and playhead. Caption tracks stack
 like video tracks in Premiere or Resolve: C1 holds the transcript, and captions on C2 and up show at the
@@ -138,7 +143,16 @@ in on a selected caption. Shift+Delete deletes and closes the gap, and Y selects
 playhead on. Cut, copy and paste with Ctrl+X/C/V (pasting at the playhead), Ctrl+D
 duplicates onto the track above, and right-click a caption or track for more. Each track can be renamed,
 hidden or locked. Snapping (S) catches the playhead, markers and neighbouring captions, and scrubbing
-the ruler stops on edit points. Up and Down jump between edit points; J, K and L shuttle.
+the ruler stops on edit points.
+
+**Keyboard editing** works the way Premiere and Resolve do. Ctrl+K (or Ctrl+B, Ctrl+\\) splits at the
+playhead, Ctrl+Shift+K through every track. Q and W (or [ and ]) trim the start or end of the selected
+caption, or the one under the playhead, to the playhead; E moves the nearest edge there, rolling the cut
+with a caption it touches. , and . nudge a frame (Shift: five) and Alt+, and Alt+. trim the end a frame.
+D selects what's under the playhead, Ctrl+Up / Ctrl+Down step through captions one by one, Enter or F2
+edits the text, and X marks the caption as In to Out. Ctrl+Alt+V pastes a copied caption's style onto
+the selection. Up / Down, Page Up / Page Down or ; and ' jump between edit points. J, K and L shuttle,
+J playing backwards, faster with each press; hold K and tap J or L to step a frame.
 
 **Markers and In / Out:** M drops a marker at the playhead (press it again to name it); drag markers
 along the ruler, right-click to color, name or delete them, and Shift+Up / Shift+Down jump between them.
@@ -178,7 +192,11 @@ brightness with skin tones keyed out), print film emulation (a density curve per
 differences give film its color crossover), saturation on light, the HSL mixer, a filmic tone map
 for log footage, and out-of-range colors pulled in along their own hue rather than clipped per
 channel. Any imported LUT comes last. The preview applies it to the video with WebGL, and the export applies the same
-LUT with ffmpeg's `lut3d`, so what you see is what you get.
+LUT with ffmpeg's `lut3d`, so what you see is what you get. HDR video is brought to standard range as it's
+decoded, through a 65-point LUT on 16-bit RGB that reproduces how Chromium shows HLG and PQ on an ordinary
+screen (measured against it: within a code value on greys). Exports are converted to YUV with the
+Rec.709 matrix and tagged as Rec.709, where ffmpeg would otherwise use Rec.601 and tag nothing, which
+players read as Rec.709 and show shifted.
 
 **Exports** run as three overlapping stages: ffmpeg decoding, GPU inference, and compositing plus
 encoding. The matting model runs at up to 1920px on the long side and its matte is scaled back up. The

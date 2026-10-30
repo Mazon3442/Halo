@@ -49,6 +49,8 @@
   <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="m19 12-7 7-7-7"/><path d="M12 5v14"/></symbol>
   <symbol id="i-pipette" viewBox="0 0 24 24"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4z"/></symbol>
   <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></symbol>
+  <symbol id="i-exposure" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 15h18"/><path d="M3 4h18v5H3z" fill="currentColor" opacity=".35"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
   <symbol id="i-wipe" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/><path d="M3 4h9v16H5a2 2 0 0 1-2-2z" fill="currentColor" opacity=".35"/></symbol>
   <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></symbol>
   <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></symbol>
@@ -253,9 +255,10 @@
             <div class="field-row">
               <button class="btn" id="grade-save" style="flex:1">Save look…</button>
               <button class="btn" id="grade-import" style="flex:1"><svg class="icon"><use href="#i-upload"/></svg>Import…</button>
+              <button class="btn" id="grade-export-lut" style="flex:1" title="Save this section's grade as a .cube LUT for Premiere, Resolve, Final Cut or CapCut"><svg class="icon"><use href="#i-download"/></svg>Export LUT…</button>
               <input type="file" id="grade-import-file" accept=".cube,.xmp" multiple hidden>
             </div>
-            <p class="hint">Import a .cube LUT from Premiere, Resolve, Final Cut or CapCut, or a Lightroom preset (.xmp).</p>
+            <p class="hint">Import a .cube LUT from Premiere, Resolve, Final Cut or CapCut, or a Lightroom preset (.xmp, curves included). Export LUT saves this grade as a .cube to use in those apps.</p>
           </div>
 
           <div class="group">
@@ -317,6 +320,8 @@
             <div class="slider-row"><label for="grade-contrast">Contrast</label><input type="range" id="grade-contrast" data-key="contrast" min="-100" max="100" step="1"><span class="value" id="grade-contrast-v"></span></div>
             <div class="slider-row"><label for="grade-highlights">Highlights</label><input type="range" id="grade-highlights" data-key="highlights" min="-100" max="100" step="1"><span class="value" id="grade-highlights-v"></span></div>
             <div class="slider-row"><label for="grade-shadows">Shadows</label><input type="range" id="grade-shadows" data-key="shadows" min="-100" max="100" step="1"><span class="value" id="grade-shadows-v"></span></div>
+            <div class="slider-row"><label for="grade-whites">Whites</label><input type="range" id="grade-whites" data-key="whites" min="-100" max="100" step="1"><span class="value" id="grade-whites-v"></span></div>
+            <div class="slider-row"><label for="grade-blacks">Blacks</label><input type="range" id="grade-blacks" data-key="blacks" min="-100" max="100" step="1"><span class="value" id="grade-blacks-v"></span></div>
             <div class="slider-row"><label for="grade-fade">Fade</label><input type="range" id="grade-fade" data-key="fade" min="0" max="100" step="1"><span class="value" id="grade-fade-v"></span></div>
           </div>
 
@@ -356,6 +361,9 @@
           </div>
           <div class="center-guide" id="center-guide" hidden></div>
           <div class="stage-badge" id="badge" hidden></div>
+          <div class="false-color-key" id="false-color-key" hidden aria-label="False colour key">
+            <span style="--c:#8c1abf">Crushed</span><span style="--c:#2659f2">Near black</span><span style="--c:#40cc4d">18% grey</span><span style="--c:#ff80b3">Grey +1 stop</span><span style="--c:#ffe61a">Near clip</span><span style="--c:#ff1a1a">Clipped</span>
+          </div>
         </div>
         <div class="scopes" id="scopes" hidden>
           <div class="scope"><canvas id="scope-wave"></canvas><span class="scope-label">Waveform</span></div>
@@ -388,6 +396,7 @@
         </div>
         <div class="right">
           <button class="btn ghost" id="scopes-toggle" aria-pressed="false" title="Show colour scopes (Ctrl+Shift+S)" hidden><svg class="icon"><use href="#i-scope"/></svg>Scopes</button>
+          <button class="btn ghost" id="false-color-toggle" aria-pressed="false" title="False colour: marks exposure by level, from crushed blacks to clipped highlights (Alt+F)" hidden><svg class="icon"><use href="#i-exposure"/></svg>False colour</button>
           <button class="btn ghost" id="wipe-toggle" aria-pressed="false" title="Split wipe: the original on the left, the grade on the right (W)" hidden><svg class="icon"><use href="#i-wipe"/></svg>Wipe</button>
           <button class="btn ghost" id="compare" title="Hold to see the original (C)" hidden><svg class="icon"><use href="#i-compare"/></svg>Compare</button>
           <button class="btn ghost icon-only" id="guides-btn" aria-label="Guides" title="Guides: safe areas, thirds and centre"><svg class="icon"><use href="#i-grid"/></svg></button>
@@ -760,11 +769,13 @@
     <div class="shortcuts">
       <h3>Playback</h3>
       <span>Play or pause</span><span class="kbd">Space</span>
-      <span>Play, faster each press · stop · back a second</span><span class="kbd">L · K · J</span>
+      <span>Shuttle: play forward, faster each press · stop</span><span class="kbd">L · K</span>
+      <span>Shuttle backwards, faster each press</span><span class="kbd">J</span>
+      <span>Step a frame while holding K</span><span class="kbd">K + J / L</span>
       <span>Previous or next frame</span><span class="kbd">Left / Right</span>
       <span>Back or forward 1 second</span><span class="kbd">Shift + Left / Right</span>
       <span>Jump to start or end</span><span class="kbd">Home / End</span>
-      <span>Previous or next edit point</span><span class="kbd">Up / Down</span>
+      <span>Previous or next edit point</span><span class="kbd">Up / Down · Page Up / Down · ; / '</span>
       <span>Go to a typed time</span><span class="kbd">Click the timecode</span>
       <span>Loop playback</span><span class="kbd">Ctrl + L</span>
       <span>Full-screen viewer</span><span class="kbd">Shift + F</span>
@@ -774,21 +785,33 @@
       <span>Add a marker (again to name it)</span><span class="kbd">M</span>
       <span>Previous or next marker</span><span class="kbd">Shift + Up / Down</span>
       <span>Set In or Out</span><span class="kbd">I / O</span>
+      <span>Mark the selected caption or grade as In to Out</span><span class="kbd">X</span>
       <span>Go to In or Out</span><span class="kbd">Shift + I / O</span>
       <span>Clear In and Out</span><span class="kbd">Alt + X</span>
       <span>Play from In to Out</span><span class="kbd">Ctrl + Shift + Space</span>
 
-      <h3>Captions</h3>
-      <span>Split a caption or colour section at the playhead</span><span class="kbd">Ctrl + K</span>
-      <span>Merge selected captions</span><span class="kbd">Shift + M</span>
-      <span>Add a caption at the playhead</span><span class="kbd">A</span>
+      <h3>Trimming and splitting</h3>
+      <span>Split at the playhead (a caption or colour section)</span><span class="kbd">Ctrl + K · Ctrl + B · Ctrl + \</span>
+      <span>Split every track at the playhead, ignoring the selection</span><span class="kbd">Ctrl + Shift + K</span>
+      <span>Trim the start or end to the playhead</span><span class="kbd">[ / ] · Q / W</span>
+      <span>Move the nearest edge to the playhead, rolling a touching neighbour</span><span class="kbd">E</span>
+      <span>Trim selected captions' ends a frame (5 with Shift)</span><span class="kbd">Alt + , / .</span>
+      <span>Nudge selected captions a frame (5 with Shift)</span><span class="kbd">, / . · Alt + Left / Right</span>
+      <span>Drag a caption's edge to trim it, between words to retime them</span><span class="kbd">Drag</span>
       <span>Delete selected captions or a colour grade</span><span class="kbd">Delete</span>
-      <span>Delete and close the gap (ripple delete)</span><span class="kbd">Shift + Delete</span>
+      <span>Delete and close the gap (ripple delete)</span><span class="kbd">Shift + Delete · Alt + Backspace</span>
+
+      <h3>Captions</h3>
+      <span>Add a caption at the playhead</span><span class="kbd">A</span>
+      <span>Edit the selected caption's text</span><span class="kbd">Enter · F2</span>
+      <span>Select the previous or next caption</span><span class="kbd">Ctrl + Up / Down</span>
+      <span>Select the captions under the playhead</span><span class="kbd">D</span>
       <span>Select captions from the playhead on</span><span class="kbd">Y</span>
-      <span>Select all captions</span><span class="kbd">Ctrl + A</span>
-      <span>Nudge selected captions a frame (5 with Shift)</span><span class="kbd">Alt + Left / Right</span>
+      <span>Select all · none</span><span class="kbd">Ctrl + A · Ctrl + Shift + A</span>
+      <span>Merge selected captions</span><span class="kbd">Shift + M</span>
       <span>Move selected captions up or down the screen</span><span class="kbd">Alt + Up / Down</span>
       <span>Cut, copy or paste captions (pastes at the playhead)</span><span class="kbd">Ctrl + X / C / V</span>
+      <span>Paste a copied caption's style onto the selection</span><span class="kbd">Ctrl + Alt + V</span>
       <span>Duplicate captions onto the track above</span><span class="kbd">Ctrl + D</span>
       <span>Copy captions while dragging</span><span class="kbd">Alt + drag</span>
       <span>Move captions to another track</span><span class="kbd">Drag up / down</span>
@@ -798,7 +821,10 @@
       <h3>Color and background</h3>
       <span>Copy or paste a section's grade</span><span class="kbd">Ctrl + C / V</span>
       <span>Bypass the selected grade, or all grades</span><span class="kbd">Ctrl + D · Shift + D</span>
+      <span>Rename the selected grade</span><span class="kbd">Enter · F2</span>
+      <span>Select the graded section under the playhead</span><span class="kbd">D</span>
       <span>Split wipe between the original and the grade</span><span class="kbd">W</span>
+      <span>False colour exposure check</span><span class="kbd">Alt + F</span>
       <span>Compare with the original (hold)</span><span class="kbd">C</span>
       <span>Show or hide colour scopes</span><span class="kbd">Ctrl + Shift + S</span>
       <span>Show the background matte</span><span class="kbd">Alt + M</span>
@@ -806,8 +832,8 @@
       <h3>Timeline and app</h3>
       <span>Zoom the timeline around the pointer</span><span class="kbd">Ctrl / Alt + wheel</span>
       <span>Zoom the timeline in or out</span><span class="kbd">= / -</span>
-      <span>Fit the whole video</span><span class="kbd">Backslash</span>
-      <span>Snapping on or off</span><span class="kbd">S</span>
+      <span>Fit the whole video</span><span class="kbd">\ · Shift + Z</span>
+      <span>Snapping on or off</span><span class="kbd">S · N</span>
       <span>Background, Captions or Color tab</span><span class="kbd">Ctrl + 1 / 2 / 3</span>
       <span>Undo · Redo</span><span class="kbd">Ctrl + Z · Ctrl + Shift + Z</span>
       <span>Export</span><span class="kbd">Ctrl + E</span>

@@ -355,6 +355,7 @@ async fn open_media(State(app): State<App>, Json(params): Json<OpenMediaParams>)
         "height": info.height,
         "duration": info.duration,
         "fps": info.fps,
+        "hdr": info.hdr,
     })))
 }
 
@@ -755,9 +756,9 @@ struct SaveTextParams {
 /// Saves caption text files (SRT, WebVTT) where the user chose in the Save As dialog.
 async fn save_text(Json(params): Json<SaveTextParams>) -> Result<StatusCode, ApiError> {
     let path = PathBuf::from(&params.path);
-    let allowed = path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["srt", "vtt"].contains(&e.to_ascii_lowercase().as_str()));
+    let allowed = path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["srt", "vtt", "cube"].contains(&e.to_ascii_lowercase().as_str()));
     if !allowed || !path.is_absolute() || !path.parent().is_some_and(|d| d.is_dir()) {
-        return Err(bad_request("Choose where to save the captions."));
+        return Err(bad_request("Choose where to save the file."));
     }
     if path.exists() && !params.overwrite {
         return Err((StatusCode::CONFLICT, "A file with that name already exists.".into()));

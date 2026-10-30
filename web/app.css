@@ -102,6 +102,7 @@ svg.icon { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: no
 .group-title { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
 .hint { color: var(--text-2); font-size: 12px; margin: 0; }
 .hint.error { color: var(--danger); }
+.hint.warn { color: var(--warning, #ffb347); }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-row { display: flex; align-items: center; gap: 10px; }
 .field label, .label { color: var(--text-2); font-size: 12px; }
@@ -671,3 +672,8 @@ body.viewer-max .screen { box-shadow: none; }
 .presets-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .shortcuts h3 { grid-column: 1 / -1; margin: 10px 0 0; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
 .shortcuts h3:first-child { margin-top: 0; }
+
+/* False colour's key, along the bottom of the picture. */
+.false-color-key { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 6; display: flex; gap: 10px; padding: 4px 10px; border-radius: 6px; background: #000b; font-size: 11px; color: #fff; white-space: nowrap; pointer-events: none; }
+.false-color-key span { display: inline-flex; align-items: center; gap: 5px; }
+.false-color-key span::before { content: ""; width: 9px; height: 9px; border-radius: 2px; background: var(--c); }
