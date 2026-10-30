@@ -37,6 +37,16 @@
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
   <symbol id="i-scope" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M6 15l3-5 2 3 3-7 4 9"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.2 3.2"/><path d="M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.2"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></symbol>
+  <symbol id="i-paste" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+  <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="m19 12-7 7-7-7"/><path d="M12 5v14"/></symbol>
 </svg>
 
 <div class="app">
@@ -179,6 +189,12 @@
 
       <section class="scroll" id="panel-color" role="tabpanel" aria-labelledby="tab-color" hidden>
         <div class="group">
+          <div class="group-title"><label for="grade-source">Footage</label></div>
+          <select id="grade-source"></select>
+          <p class="hint" id="grade-source-hint"></p>
+        </div>
+
+        <div class="group">
           <div class="group-title"><span>Section</span><span id="grade-where"></span></div>
           <p class="hint" id="grade-hint"></p>
           <div class="field-row">
@@ -200,6 +216,24 @@
               <input type="file" id="grade-import-file" accept=".cube,.xmp" multiple hidden>
             </div>
             <p class="hint">Import a .cube LUT from Premiere, Resolve, Final Cut or CapCut, or a Lightroom preset (.xmp).</p>
+          </div>
+
+          <div class="group">
+            <div class="group-title">Film</div>
+            <select id="grade-film" aria-label="Film emulation"></select>
+            <div class="slider-row" id="grade-film-amount-row">
+              <label for="grade-filmAmount">Strength</label>
+              <input type="range" id="grade-filmAmount" data-key="filmAmount" min="0" max="100" step="1">
+              <span class="value" id="grade-filmAmount-v"></span>
+            </div>
+            <p class="hint">Print film curves. Small differences between their red, green and blue responses give film its color: cooler shadows and warmer highlights, without a tint over the picture.</p>
+          </div>
+
+          <div class="group">
+            <div class="group-title">Color wheels</div>
+            <div class="wheels" id="grade-wheels"></div>
+            <div class="slider-row"><label for="grade-skinProtect">Protect skin</label><input type="range" id="grade-skinProtect" data-key="skinProtect" min="0" max="100" step="1"><span class="value" id="grade-skinProtect-v"></span></div>
+            <p class="hint">Drag a wheel's dot toward a color to push the shadows, midtones or highlights that way. The slider under each wheel brightens or darkens that range. Double-click a wheel to reset it. Protect skin keeps faces out of the wheels' color.</p>
           </div>
 
           <div class="group">
@@ -285,7 +319,7 @@
           <div class="group-title"><span>Style</span><span id="preset-state"></span></div>
           <div class="segmented" role="radiogroup" aria-label="Apply style to">
             <input type="radio" name="scope" id="scope-all" value="all" checked><label for="scope-all">All captions</label>
-            <input type="radio" name="scope" id="scope-one" value="one"><label for="scope-one">Selected caption</label>
+            <input type="radio" name="scope" id="scope-one" value="one"><label for="scope-one" id="scope-one-label">Selected caption</label>
           </div>
           <p class="hint" id="scope-hint"></p>
         </div>
@@ -295,7 +329,7 @@
           <button class="btn wide" id="preset-save">Save current as…</button>
         </div>
 
-        <div class="group global-only">
+        <div class="group">
           <div class="group-title">Text</div>
           <div class="field">
             <label for="st-font">Font</label>
@@ -322,12 +356,17 @@
         <div class="group">
           <div class="group-title">Color</div>
           <div class="color-row"><label for="st-fill">Text</label><input type="color" id="st-fill"></div>
+<<<<<<< HEAD
           <div class="color-row" id="st-highlight-row"><label for="st-highlight" id="st-highlight-label">Spoken word</label><input type="color" id="st-highlight"></div>
           <div class="color-row global-only" id="st-fill-opacity-row">
             <label for="st-fill-opacity">Text opacity</label>
             <input type="range" id="st-fill-opacity" min="10" max="100" step="5">
           </div>
           <div class="field global-only">
+=======
+          <div class="color-row"><label for="st-highlight" id="st-highlight-label">Spoken word</label><input type="color" id="st-highlight"></div>
+          <div class="field">
+>>>>>>> 8e5afa8b4b89c874f2a6ceb74b7b641c407701ce
             <label for="st-gradient">Gradient</label>
             <select id="st-gradient">
               <option value="none">None</option>
@@ -335,20 +374,20 @@
               <option value="down">Top to bottom</option>
             </select>
           </div>
-          <div class="color-row global-only" id="st-gradient-row">
+          <div class="color-row" id="st-gradient-row">
             <label>Colors</label>
             <input type="color" id="st-g0" aria-label="First gradient color">
             <input type="color" id="st-g1" aria-label="Middle gradient color">
             <input type="color" id="st-g2" aria-label="Last gradient color">
           </div>
-          <label class="check global-only" id="st-g-mid-row"><input type="checkbox" id="st-g-mid"> Middle color</label>
+          <label class="check" id="st-g-mid-row"><input type="checkbox" id="st-g-mid"> Middle color</label>
           <label class="check global-only"><input type="checkbox" id="st-invert"> Invert the video's brightness inside the text</label>
         </div>
 
-        <div class="group global-only">
-          <div class="group-title">Animation</div>
+        <div class="group">
+          <div class="group-title">Spoken word</div>
           <div class="field">
-            <label for="st-word">Spoken word</label>
+            <label for="st-word" class="visually-hidden">How the spoken word stands out</label>
             <select id="st-word">
               <option value="color">Highlight color</option>
               <option value="box">Highlight box</option>
@@ -363,20 +402,23 @@
             </select>
           </div>
           <label class="check"><input type="checkbox" id="st-pop"> Grow the spoken word</label>
-          <div class="field">
-            <label for="st-entrance">Caption entrance</label>
-            <select id="st-entrance">
-              <option value="pop">Pop in</option>
-              <option value="bounce">Bounce</option>
-              <option value="slide">Slide up</option>
-              <option value="fade">Fade</option>
-              <option value="pop-up">Spring up</option>
-              <option value="none">None</option>
-            </select>
-          </div>
         </div>
 
-        <div class="group global-only">
+        <div class="group" id="anim-group">
+          <div class="group-title"><span>Animation</span><span id="anim-state"></span></div>
+          <div class="field-row">
+            <select id="anim-plugin" aria-label="Animation plugin" style="flex:1; min-width:0"></select>
+            <button class="btn" id="anim-preview" title="Play the caption to see its animation"><svg class="icon"><use href="#i-play"/></svg>Preview</button>
+          </div>
+          <p class="hint" id="anim-desc"></p>
+          <p class="warn-line" id="anim-missing" hidden>This animation's plugin isn't installed, so these captions don't animate. Put the plugin back in Halo's plugins folder, or pick another animation.</p>
+          <div class="fx-presets" id="anim-presets" role="radiogroup" aria-label="Animation presets"></div>
+          <div class="fx-sections" id="anim-sections"></div>
+          <p class="hint">Drag a preset onto captions on the timeline to animate just those. Drag a selected caption's top corners on the timeline to change how long it animates in and out.</p>
+          <button class="btn ghost" id="anim-plugins-folder" title="Plugins are .js files in this folder; Halo loads them when it starts"><svg class="icon"><use href="#i-folder"/></svg>Plugins folder</button>
+        </div>
+
+        <div class="group">
           <div class="group-title">Outline and shadow</div>
           <div class="color-row">
             <label for="st-outline">Outline</label>
@@ -419,9 +461,10 @@
 
         <div class="group one-only" id="emphasis-group">
           <div class="group-title">Emphasize words</div>
-          <p class="hint">Pick a word, then a color. It keeps that color when it isn't being spoken.</p>
-          <div class="chips" id="word-chips"></div>
-          <div class="swatches" id="emphasis-swatches">
+          <p class="hint single-only">Pick a word, then a color. It keeps that color when it isn't being spoken.</p>
+          <p class="hint multi-only">Select a single caption to color its words.</p>
+          <div class="chips single-only" id="word-chips"></div>
+          <div class="swatches single-only" id="emphasis-swatches">
             <button class="swatch" data-emph="#ffd43b" style="background:#ffd43b" aria-label="Yellow"></button>
             <button class="swatch" data-emph="#3be477" style="background:#3be477" aria-label="Green"></button>
             <button class="swatch" data-emph="#ff5a5a" style="background:#ff5a5a" aria-label="Red"></button>
@@ -429,7 +472,7 @@
             <button class="swatch" data-emph="#a78bfa" style="background:#a78bfa" aria-label="Purple"></button>
             <button class="btn ghost" data-emph="" style="height:24px;padding:0 8px">Clear</button>
           </div>
-          <button class="btn wide" id="reset-one">Reset this caption to the overall style</button>
+          <button class="btn wide" id="reset-one">Reset to the overall style</button>
         </div>
       </div>
     </aside>
@@ -459,17 +502,19 @@
         </div>
       </div>
       <div class="tl-body">
-        <div class="tl-heads" aria-hidden="true">
-          <div class="tl-head ruler"></div>
-          <div class="tl-head captions"><b>C1</b>Captions</div>
-          <div class="tl-head grade"><b>G1</b>Color</div>
-          <div class="tl-head video"><b>V1</b>Video</div>
-          <div class="tl-head audio"><b>A1</b>Audio</div>
+        <div class="tl-heads">
+          <div class="tl-head ruler" aria-hidden="true"></div>
+          <div class="tl-head new-track"><button class="tl-add-track" id="tl-add-track" title="Add a caption track. You can also drag captions up here to put them on a new one."><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Track</button></div>
+          <div id="tl-caption-heads"></div>
+          <div class="tl-head grade" aria-hidden="true"><b>G1</b>Color</div>
+          <div class="tl-head video" aria-hidden="true"><b>V1</b>Video</div>
+          <div class="tl-head audio" aria-hidden="true"><b>A1</b>Audio</div>
         </div>
         <div class="tl-scroll" id="tl-scroll">
           <div class="tl-content" id="tl-content">
             <div class="tl-row ruler" id="tl-ruler-row"><canvas id="tl-ruler"></canvas></div>
-            <div class="tl-row captions" id="tl-captions" title="Double-click empty space to add a caption"></div>
+            <div class="tl-row new-track" id="tl-new-track" title="Drag captions here, or double-click, to start a new track"><span>New track</span></div>
+            <div id="tl-caption-rows"></div>
             <div class="tl-row grade" id="tl-grades"></div>
             <div class="tl-row video" id="tl-video-row"><canvas id="tl-video"></canvas></div>
             <div class="tl-row audio" id="tl-audio-row"><canvas id="tl-audio"></canvas></div>
@@ -633,6 +678,13 @@
       <span>Nudge selected captions a frame (5 with Shift)</span><span class="kbd">Alt + Left / Right</span>
       <span>Move selected captions up or down the screen</span><span class="kbd">Alt + Up / Down</span>
       <span>Select all captions</span><span class="kbd">Ctrl + A</span>
+      <span>Cut, copy or paste captions (pastes at the playhead)</span><span class="kbd">Ctrl + X / C / V</span>
+      <span>Duplicate captions onto the track above</span><span class="kbd">Ctrl + D</span>
+      <span>Copy captions while dragging</span><span class="kbd">Alt + drag</span>
+      <span>Move captions to another track</span><span class="kbd">Drag up / down</span>
+      <span>Previous or next edit point</span><span class="kbd">Up / Down</span>
+      <span>Play, faster each press · stop · back a second</span><span class="kbd">L · K · J</span>
+      <span>Zoom the timeline around the pointer</span><span class="kbd">Ctrl / Alt + wheel</span>
       <span>Snapping on or off</span><span class="kbd">S</span>
       <span>Show or hide colour scopes</span><span class="kbd">Ctrl + Shift + S</span>
       <span>Zoom the timeline in or out</span><span class="kbd">= / -</span>

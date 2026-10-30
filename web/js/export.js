@@ -232,8 +232,8 @@ export function createExporter({ store, getMedia, getPrefs, savePrefs, toast, ba
     const body = {
       media: media.id,
       ...(captionsOnly ? { mode: "none" } : doc.background),
-      captions: burn ? buildAss(cap, size.w, size.h) : null,
-      caption_mask: burn ? buildMask(cap, size.w, size.h) : null,
+      captions: burn ? buildAss(cap, size.w, size.h, { fps: media.fps || 30 }) : null,
+      caption_mask: burn ? buildMask(cap, size.w, size.h, { fps: media.fps || 30 }) : null,
       srt: srt ? buildSrt(doc.captions) : null,
       fonts: burn ? usedFonts(doc.captions) : [],
       grades,

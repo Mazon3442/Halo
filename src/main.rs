@@ -54,6 +54,8 @@ struct App {
     prefs_path: PathBuf,
     /// Imported colour LUTs (.cube), named by a hash of their contents.
     luts: PathBuf,
+    /// The user's plugins: JavaScript modules the page loads next to the built-in ones.
+    plugins: PathBuf,
     media: Arc<Mutex<HashMap<u64, Arc<Media>>>>,
     jobs: Arc<Mutex<HashMap<u64, JobRecord>>>,
     queue: mpsc::Sender<Job>,
@@ -154,6 +156,7 @@ fn main() {
                 projects: Arc::new(Projects::new(data.join("projects"))),
                 prefs_path: data.join("prefs.json"),
                 luts: data.join("luts"),
+                plugins: data.join("plugins"),
                 media: Default::default(),
                 jobs: Default::default(),
                 queue,
@@ -267,6 +270,9 @@ async fn serve(app: App, web: PathBuf) -> anyhow::Result<std::net::SocketAddr> {
         .route("/prefs", get(get_prefs).put(save_prefs))
         .route("/luts", post(import_lut))
         .route("/luts/{id}", get(lut_file))
+        .route("/plugins", get(list_plugins))
+        .route("/plugins/open", post(open_plugins_folder))
+        .route("/plugins/{name}", get(plugin_file))
         .route("/files/text", post(save_text))
         .route("/reveal", post(reveal_path))
         .route("/fonts", get(list_fonts))
@@ -660,6 +666,45 @@ async fn lut_file(State(app): State<App>, Path(id): Path<String>) -> Result<Resp
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "That LUT is no longer in Halo's library.".to_string()))?;
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text).into_response())
+}
+
+/// Plugin files are plain names in the plugins folder: no paths, and JavaScript only.
+fn plugin_name_ok(name: &str) -> bool {
+    name.len() <= 100
+        && name.ends_with(".js")
+        && !name.starts_with('.')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+async fn list_plugins(State(app): State<App>) -> Json<Value> {
+    let mut names: Vec<String> = std::fs::read_dir(&app.plugins)
+        .map(|dir| {
+            dir.filter_map(|e| e.ok())
+                .filter(|e| e.path().is_file())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| plugin_name_ok(n))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    Json(json!(names.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>()))
+}
+
+async fn plugin_file(State(app): State<App>, Path(name): Path<String>) -> Result<Response, ApiError> {
+    if !plugin_name_ok(&name) {
+        return Err(bad_request("bad plugin name"));
+    }
+    let text = tokio::fs::read_to_string(app.plugins.join(&name))
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "That plugin isn't in the plugins folder any more.".to_string()))?;
+    Ok(([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], text).into_response())
+}
+
+/// Opens the plugins folder in Explorer, making it first if it isn't there yet.
+async fn open_plugins_folder(State(app): State<App>) -> Result<StatusCode, ApiError> {
+    tokio::fs::create_dir_all(&app.plugins).await.map_err(internal)?;
+    tool("explorer").arg(&app.plugins).spawn().map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
