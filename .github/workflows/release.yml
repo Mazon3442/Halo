@@ -101,6 +101,11 @@ jobs:
             cmake clang libfuse2 rpm \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
 
+      # The ONNX Runtime library Linux builds load at runtime, from Microsoft's own build.
+      - name: Fetch ONNX Runtime (Linux)
+        if: runner.os == 'Linux'
+        run: packaging/fetch-onnxruntime.sh
+
       # A static ffmpeg (no system libraries), so every distro gets the same encoders and filters. BtbN's builds
       # follow ffmpeg's release branches; the newest branch there is used, and checked before it's packed.
       - name: Fetch ffmpeg (Linux)

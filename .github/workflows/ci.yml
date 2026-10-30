@@ -46,17 +46,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libxdo-dev \
             patchelf cmake clang ffmpeg
+          packaging/fetch-onnxruntime.sh
 
       # ffmpeg decodes the test recording for the speech test.
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
 
-      # The Windows bundle lists ffmpeg.exe, ffprobe.exe and DirectML.dll as resources, which the
-      # build checks for. A plain build doesn't need the real files.
-      - name: Placeholder bundle resources (Windows)
+      # The Windows bundle lists ffmpeg.exe, ffprobe.exe and DirectML.dll as resources, which the build
+      # checks for and copies next to the app. ffmpeg can be a stand-in here; DirectML.dll has to be real
+      # (the app loads it), so it's taken from ort, which places it on its first build.
+      - name: Bundle resources (Windows)
         if: runner.os == 'Windows'
-        run: mkdir -p ffmpeg target/release && touch ffmpeg/ffmpeg.exe ffmpeg/ffprobe.exe target/release/DirectML.dll
+        run: |
+          mkdir -p ffmpeg target/release
+          touch ffmpeg/ffmpeg.exe ffmpeg/ffprobe.exe
+          cargo build --locked -p ort-sys
+          cp -L target/debug/DirectML.dll target/release/DirectML.dll
 
       - name: Build
         run: cargo build --locked

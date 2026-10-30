@@ -21,6 +21,9 @@
       "rpm": {
         "desktopTemplate": "packaging/linux/halo.desktop"
       }
+    },
+    "resources": {
+      "onnxruntime/libonnxruntime.so": "libonnxruntime.so"
     }
   }
 }

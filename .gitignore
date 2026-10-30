@@ -5,6 +5,8 @@
 # ffmpeg.exe and ffprobe.exe here (from https://www.gyan.dev/ffmpeg/builds/); Linux and macOS
 # packages take ffmpeg and ffprobe from here too (see the release workflow).
 /ffmpeg/
+# The ONNX Runtime library Linux builds load (packaging/fetch-onnxruntime.sh fetches it).
+/onnxruntime/
 
 # OS / editor cruft
 .DS_Store

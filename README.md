@@ -268,8 +268,10 @@ cargo build --release                    # DirectML.dll is copied next to the ex
 npx @tauri-apps/cli@2 build              # installer in target/release/bundle/nsis
 ```
 
-**Linux:** install WebKitGTK and the build tools first. A development build uses the ffmpeg on your
-PATH (any recent one: captions don't need its whisper filter there).
+**Linux:** install WebKitGTK and the build tools first, then fetch ONNX Runtime, which Halo loads at
+runtime on Linux: `packaging/fetch-onnxruntime.sh` puts Microsoft's build (it needs only glibc 2.28) in
+`onnxruntime/`, and every package carries it. A development build uses the ffmpeg on your PATH (any
+recent one: captions don't need its whisper filter there).
 
 ```bash
 # Ubuntu / Debian
@@ -282,6 +284,7 @@ sudo dnf install webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel l
 sudo pacman -S --needed base-devel webkit2gtk-4.1 libappindicator-gtk3 librsvg xdotool cmake clang ffmpeg \
   gst-plugins-good gst-libav
 
+packaging/fetch-onnxruntime.sh
 cargo run                                # or: npx @tauri-apps/cli@2 build  (deb, rpm and AppImage)
 ```
 

@@ -21,7 +21,7 @@ ttf-parser = "0.25"
 uuid = { version = "1", features = ["v4"] }
 
 # The matting and alignment models run on the GPU where ONNX Runtime has a backend for it:
-# DirectML on Windows, CoreML on Apple Silicon Macs. Linux runs them on the CPU.
+# DirectML on Windows, Core ML on Apple Silicon Macs. Linux runs them on the CPU.
 [target.'cfg(windows)'.dependencies]
 ort = { version = "=2.0.0-rc.15", features = ["directml"] }
 
@@ -32,6 +32,9 @@ ort = { version = "=2.0.0-rc.15", features = ["coreml"] }
 whisper-rs = { version = "0.16", features = ["metal"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Loaded at runtime from the library packages carry (packaging/fetch-onnxruntime.sh), which runs on
+# older distros than ort's linked-in builds do.
+ort = { version = "=2.0.0-rc.15", features = ["load-dynamic"] }
 whisper-rs = "0.16"
 
 [features]

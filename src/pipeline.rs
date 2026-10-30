@@ -1170,17 +1170,50 @@ pub fn ort_env() -> Result<ort::environment::Environment> {
     static ENV: Mutex<Option<ort::environment::Environment>> = Mutex::new(None);
     let mut env = ENV.lock().unwrap();
     if env.is_none() {
-        *env = Some(ort::init().with_name("halo").build()?);
+        #[cfg(target_os = "linux")]
+        let builder = {
+            let library = onnxruntime_library();
+            ort::init_from(&library).map_err(|e| {
+                anyhow::anyhow!("couldn't load ONNX Runtime from {}: {e}. Reinstalling Halo should fix this.", library.display())
+            })?
+        };
+        #[cfg(not(target_os = "linux"))]
+        let builder = ort::init();
+        *env = Some(builder.with_name("halo").build()?);
     }
     Ok(env.clone().unwrap())
 }
 
-/// Where the installer put its own ffmpeg and ffprobe; set once at startup.
+/// The ONNX Runtime library to load on Linux: ORT_DYLIB_PATH if it's set, else the copy Halo's
+/// package carries, else one the system has.
+#[cfg(target_os = "linux")]
+fn onnxruntime_library() -> PathBuf {
+    if let Some(path) = std::env::var_os("ORT_DYLIB_PATH").filter(|p| !p.is_empty()) {
+        return PathBuf::from(path);
+    }
+    let beside_exe = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf));
+    RESOURCE_DIR
+        .get()
+        .cloned()
+        .into_iter()
+        .chain(beside_exe)
+        .map(|dir| dir.join("libonnxruntime.so"))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("libonnxruntime.so"))
+}
+
+/// Where the package put Halo's own files, ONNX Runtime among them.
+#[cfg(target_os = "linux")]
+static RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Where the installer put its own ffmpeg and ffprobe (and on Linux ONNX Runtime); set once at startup.
 ///
 /// Some Linux packages lose the files' executable bit on the way. Where the folder can't be
 /// fixed (a system folder, or a read-only AppImage), the tools are copied to `cache` and run
 /// from there instead.
 pub fn use_tools_from(dir: PathBuf, cache: &Path) {
+    #[cfg(target_os = "linux")]
+    let _ = RESOURCE_DIR.set(dir.clone());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
