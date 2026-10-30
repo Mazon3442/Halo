@@ -4,7 +4,7 @@
 // Words sit on caption tracks (C1, C2, ...), which stack like video tracks in an editor. The words
 // array is kept in track order and then time order, so every line is a run of neighbouring words.
 
-import { phaseLengths, resolveMotion, shiftTransitions, writeLine } from "./motion.js";
+import { letterCount, phaseLengths, resolveMotion, shiftTransitions, writeLine } from "./motion.js";
 import { GLOBAL_ONLY, defaultTracks } from "./styles.js";
 
 /** The track a word is on. Words from before tracks existed are on the first. */
@@ -667,17 +667,18 @@ function buildTrack(captions, width, height, { fps = 30, hideLetters = false } =
 
     const motion = resolveMotion(st.motion);
     const chars = [...lineWords.map(display).join(" ")].length;
+    const animatedLetters = letterCount(lineWords.map(display).join(" "));
     const textW = chars * size * (0.56 + st.spacing);
     const rows = Math.min(3, Math.max(1, Math.ceil(textW / (base.width * W))));
     const extent = { w: Math.min(textW, base.width * W), h: rows * size };
     const frame = { w: W, h: H };
-    // An entrance that scales the line already makes the first word pop.
-    const { tin } = phaseLengths(motion, end - start, rate);
-    const entranceScales = !!motion && tin > 0 && Math.abs((motion.plugin.frame(motion.params, {
+    // An entrance that scales the line already makes the first word pop. Letter by letter, nothing scales.
+    const { tin, gap } = phaseLengths(motion, end - start, rate, animatedLetters);
+    const entranceScales = !!motion && tin > 0 && !gap && Math.abs((motion.plugin.frame(motion.params, {
       phase: "in", progress: 0, holdTime: 0, holdDuration: 0, size, box: extent, frame, fps: rate, seed: k, lineDuration: end - start,
     })?.scale ?? 1) - 1) > 0.05;
     const finish = () => writeLine(out, {
-      events, start, end, anchor: { x, y }, size, box: extent, frame, fps: rate, motion, seed: k, spacing: spacingPx(st),
+      events, start, end, anchor: { x, y }, size, box: extent, frame, fps: rate, motion, seed: k, spacing: spacingPx(st), letters: animatedLetters,
     });
 
     if (st.wordStyle === "karaoke") {

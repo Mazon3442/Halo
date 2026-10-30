@@ -75,6 +75,10 @@ Any field can have `show: (params) => boolean` to hide it when it doesn't apply.
   selected caption's top corners on the timeline drag them.
 - `animatesHold(params)` (optional) returns true when the caption also moves between its in and out.
   Halo then bakes the hold frame by frame, so leave it false when nothing moves there.
+- `stagger(params)` (optional) returns how many frames each letter starts after the one before, or 0.
+  When it's above 0, every letter runs the in and out on its own, offset from the one before, and the
+  whole caption takes that much longer to arrive and leave. Only `x`, `y`, `opacity`, `blur` and `mask`
+  apply to single letters, and there's no motion blur.
 - `motionBlur(params)` (optional) returns `{ strength: 0 to 1, shutter: degrees, samples }` or null.
   Halo adds the blur and the trailing copies from how far the caption moves on each frame.
 

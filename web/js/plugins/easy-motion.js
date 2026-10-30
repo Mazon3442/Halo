@@ -1,7 +1,7 @@
 // Easy Motion: Halo's built-in caption animation, laid out the way motion plugins in Resolve and
 // Premiere are. A base animation in and out (a direction, a style, how far and how many frames),
 // extras that ride along with it (scale, rotation, 3D tilt, blur, tracking, fade), an effect that
-// plays while the caption holds on screen, and motion blur.
+// plays while the caption holds on screen, motion blur, and the option to run it letter by letter.
 //
 // Every value is a function of where the caption is in its life, so the same numbers give the same
 // frame in the live preview and in the export.
@@ -79,6 +79,7 @@ export default function easyMotion(halo) {
     outEase: "auto", outFade: true, outScale: 100, outRotation: 0, outTilt: 0, outBlur: 0, outTracking: 0,
     effect: "none", effectAmount: 40, effectSpeed: 1,
     mbEnabled: false, mbStrength: 60, mbSamples: 3, mbShutter: 180,
+    letters: false, letterGap: 1,
   };
 
   /** One preset is a handful of settings over the defaults. */
@@ -91,6 +92,7 @@ export default function easyMotion(halo) {
     preset("slide-up", "Slide up", { inDirection: "up", inDistance: 0.05, inDuration: 5 }),
     preset("fade", "Fade", { inDirection: "none", inDuration: 4, outDuration: 4 }),
     preset("spring-up", "Spring up", { inDirection: "up", inStyle: "spring", inDistance: 0.03, inScale: 40, inDuration: 8 }),
+    preset("letter-rise", "Rise by letter", { inDirection: "up", inDistance: 0.05, inDuration: 12, letters: true, letterGap: 1.2 }),
     preset("rise", "Rise and fall", { inDirection: "up", inDistance: 0.05, inDuration: 8, outDirection: "down", outDistance: 0.05, outDuration: 6 }),
     preset("mask-up", "Mask up", { inDirection: "up", inStyle: "mask", inFade: false, inDuration: 9, outDirection: "up", outStyle: "mask", outFade: false, outDuration: 7 }),
     preset("drop", "Drop in", { inDirection: "down", inStyle: "bounce", inDistance: 0.12, inFade: false, inDuration: 14 }),
@@ -194,6 +196,12 @@ export default function easyMotion(halo) {
         ],
       },
       {
+        id: "letters", title: "Letter by letter", fields: [
+          { key: "letters", label: "Animate each letter", type: "toggle" },
+          { key: "letterGap", label: "Offset (frames)", type: "slider", min: 0.2, max: 6, step: 0.1, decimals: 1, show: (v) => v.letters },
+        ],
+      },
+      {
         id: "motion-blur", title: "Motion blur", fields: [
           { key: "mbEnabled", label: "Motion blur", type: "toggle" },
           { key: "mbStrength", label: "Strength", type: "slider", min: 0, max: 100, step: 1, decimals: 0, show: (v) => v.mbEnabled },
@@ -206,6 +214,8 @@ export default function easyMotion(halo) {
     durationKeys: { in: "inDuration", out: "outDuration" },
     durations: (p) => ({ in: p.inDuration, out: p.outDuration }),
     animatesHold: (p) => p.effect !== "none" && p.effectAmount > 0,
+    /** Letter by letter: how many frames each letter starts after the one before. */
+    stagger: (p) => (p.letters ? p.letterGap : 0),
     motionBlur: (p) => (p.mbEnabled && p.mbStrength > 0 ? { strength: p.mbStrength / 100, shutter: p.mbShutter, samples: p.mbSamples } : null),
     /**
      * The caption's transform on one frame. ctx.phase is "in", "hold" or "out", ctx.progress runs
