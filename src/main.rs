@@ -3,6 +3,7 @@
 
 mod align;
 mod aligner;
+mod download;
 mod fonts;
 mod pipeline;
 mod projects;
@@ -27,8 +28,9 @@ use tauri::{DragDropEvent, Manager, RunEvent, WebviewUrl, WebviewWindow, Webview
 use tower::ServiceExt;
 use tower_http::services::{ServeDir, ServeFile};
 
+use download::ModelStatus;
 use fonts::Fonts;
-use pipeline::{Engine, ExportSettings, Format, Grade, Job, Mode, Quality, Settings, Status};
+use pipeline::{Engine, ExportSettings, Format, Grade, Job, Mode, Model, Quality, Settings, Status};
 use projects::Projects;
 use speech::SpeechModel;
 
@@ -88,6 +90,8 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 #[derive(Deserialize)]
 struct EffectParams {
     mode: String,
+    /// "standard" (the default) or "high".
+    model: Option<String>,
     blur: Option<f32>,
     color: Option<String>,
     /// Matte refinement and background dimming, each optional and 0 when left out.
@@ -99,6 +103,7 @@ struct EffectParams {
 impl EffectParams {
     fn settings(&self) -> Result<Settings, ApiError> {
         let mode = Mode::parse(&self.mode).ok_or_else(|| bad_request("mode must be none, blur, remove or color"))?;
+        let model = Model::parse(self.model.as_deref().unwrap_or("standard")).ok_or_else(|| bad_request("model must be standard or high"))?;
         let blur = self.blur.unwrap_or(20.0);
         if !blur.is_finite() {
             return Err(bad_request("blur must be a number"));
@@ -110,6 +115,7 @@ impl EffectParams {
         let unit = |v: Option<f32>, lo: f32| v.filter(|v| v.is_finite()).unwrap_or(0.0).clamp(lo, 1.0);
         Ok(Settings {
             mode,
+            model,
             blur: blur.clamp(2.0, 80.0),
             color,
             edge: unit(self.edge, -1.0),
@@ -127,7 +133,8 @@ fn main() {
                 pipeline::use_tools_from(dir, &app.path().app_cache_dir()?.join("bin"));
             }
             let model =app.path().resolve("models/rvm_mobilenetv3_fp32.onnx", BaseDirectory::Resource)?;
-            let engine = match Engine::new(&model) {
+            let data = app.path().app_data_dir()?;
+            let engine = match Engine::new(&model, data.join("models")) {
                 Ok(engine) => Arc::new(engine),
                 Err(e) => {
                     rfd::MessageDialog::new()
@@ -139,7 +146,6 @@ fn main() {
                 }
             };
             let web = app.path().resolve("web", BaseDirectory::Resource)?;
-            let data = app.path().app_data_dir()?;
             let cache = app.path().app_cache_dir()?;
             clear_old_work(&cache.join("work"));
             let _ = WORK_DIR.set(cache.join("work").join(std::process::id().to_string()));
@@ -347,6 +353,8 @@ async fn serve(app: App, web: PathBuf) -> anyhow::Result<std::net::SocketAddr> {
         .route("/fonts/{id}/file", get(font_file))
         .route("/speech", get(speech_status))
         .route("/speech/download", post(speech_download))
+        .route("/matting", get(matting_status))
+        .route("/matting/download", post(matting_download))
         .route("/jobs", post(create_job))
         .route("/jobs/{id}", get(job_status))
         .route("/jobs/{id}/cancel", post(cancel_job))
@@ -425,6 +433,7 @@ async fn media_file(State(app): State<App>, Path(id): Path<u64>, request: Reques
 struct PreviewParams {
     t: f64,
     mode: String,
+    model: Option<String>,
     blur: Option<f32>,
     color: Option<String>,
     edge: Option<f32>,
@@ -439,6 +448,7 @@ async fn preview(State(app): State<App>, Path(id): Path<u64>, Query(params): Que
     let matte = params.view.as_deref() == Some("matte");
     let settings = EffectParams {
         mode: params.mode,
+        model: params.model,
         blur: params.blur,
         color: params.color,
         edge: params.edge,
@@ -604,13 +614,23 @@ async fn save_prefs(State(app): State<App>, Json(prefs): Json<Value>) -> Result<
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn speech_status(State(app): State<App>) -> Json<speech::ModelStatus> {
+async fn speech_status(State(app): State<App>) -> Json<ModelStatus> {
     Json(app.speech.status())
 }
 
-async fn speech_download(State(app): State<App>) -> Json<speech::ModelStatus> {
+async fn speech_download(State(app): State<App>) -> Json<ModelStatus> {
     app.speech.start_download();
     Json(app.speech.status())
+}
+
+/// The High quality matting model's download.
+async fn matting_status(State(app): State<App>) -> Json<ModelStatus> {
+    Json(app.engine.high_quality().status())
+}
+
+async fn matting_download(State(app): State<App>) -> Json<ModelStatus> {
+    app.engine.high_quality().start();
+    Json(app.engine.high_quality().status())
 }
 
 #[derive(Deserialize)]

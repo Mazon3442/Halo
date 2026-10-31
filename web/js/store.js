@@ -13,7 +13,7 @@ export function newDocument(media) {
     name: media.name,
     video_path: media.path,
     updated: Date.now(),
-    background: { mode: "none", blur: 20, color: "#00b140" },
+    background: { mode: "none", model: "standard", blur: 20, color: "#00b140" },
     captions: { language: "auto", perLine: 3, words: [], edits: 0, style: presetStyle("pop"), overrides: {} },
     grade: { sections: [], nextId: 1 },
   };

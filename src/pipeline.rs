@@ -14,6 +14,7 @@ use ort::{ep, session::Session, value::{DynValue, Tensor, TensorRef}};
 use rayon::prelude::*;
 use serde::Serialize;
 
+use crate::download::Download;
 use crate::speech::filter_path;
 
 /// Frames run before the previewed one so the recurrent model has settled, like it would mid-video.
@@ -51,9 +52,36 @@ impl Mode {
     }
 }
 
+/// Which matting model separates the subject from the background.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Model {
+    /// RVM on MobileNetV3: ships with Halo, and fast.
+    Standard,
+    /// RVM on ResNet50: holds hair and fine edges more steadily, at about half the speed.
+    /// Downloaded on first use.
+    High,
+}
+
+impl Model {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "standard" => Some(Self::Standard),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+}
+
+/// The High quality model, as (file, URL). Too big to ship with Halo (107 MB), so it's downloaded.
+pub const HIGH_QUALITY_MODEL: &[(&str, &str)] = &[(
+    "rvm_resnet50_fp32.onnx",
+    "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_resnet50_fp32.onnx",
+)];
+
 #[derive(Clone, Copy)]
 pub struct Settings {
     pub mode: Mode,
+    pub model: Model,
     pub blur: f32,
     pub color: [u8; 3],
     /// Moves the matte's edge out (positive) or in (negative), -1 to 1, like After Effects' Shift Edge.
@@ -205,8 +233,11 @@ pub struct Preview {
 }
 
 pub struct Engine {
-    /// Locked per frame, so previews can slip in between frames of a running export.
+    /// The Standard model. Locked per frame, so previews can slip in between frames of a running export.
     session: Mutex<Session>,
+    /// The High quality model's file, and its session once something has used it.
+    high_quality: Arc<Download>,
+    high_quality_session: OnceLock<Mutex<Session>>,
     /// The GPU's video encoder, when ffmpeg can use one here.
     hardware: Option<HardwareEncoder>,
 }
@@ -236,8 +267,16 @@ fn execution_providers() -> Vec<ep::ExecutionProviderDispatch> {
     Vec::new()
 }
 
+fn load_model(path: &Path) -> Result<Session> {
+    Ok(Session::builder(&ort_env()?)?
+        .with_execution_providers(execution_providers())
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .commit_from_file(path)?)
+}
+
 impl Engine {
-    pub fn new(model: &Path) -> Result<Self> {
+    /// `model` is the Standard model; the High quality one is downloaded into `models_dir`.
+    pub fn new(model: &Path, models_dir: PathBuf) -> Result<Self> {
         if !model.exists() {
             bail!(
                 "model not found at {}. Download rvm_mobilenetv3_fp32.onnx from \
@@ -245,13 +284,37 @@ impl Engine {
                 model.display()
             );
         }
-        let session = Session::builder(&ort_env()?)?
-            .with_execution_providers(execution_providers())
-            .map_err(|e| anyhow::anyhow!("{e}"))?
-            .commit_from_file(model)?;
+        let session = load_model(model)?;
         let hardware = hardware_encoder();
         println!("model loaded; hardware encoder: {hardware:?}");
-        Ok(Self { session: Mutex::new(session), hardware })
+        Ok(Self {
+            session: Mutex::new(session),
+            high_quality: Arc::new(Download::new(models_dir, HIGH_QUALITY_MODEL)),
+            high_quality_session: OnceLock::new(),
+            hardware,
+        })
+    }
+
+    /// The High quality model's download.
+    pub fn high_quality(&self) -> &Arc<Download> {
+        &self.high_quality
+    }
+
+    /// The session running `model`, loading the High quality one the first time it's used.
+    fn session(&self, model: Model) -> Result<&Mutex<Session>> {
+        if model == Model::Standard {
+            return Ok(&self.session);
+        }
+        if let Some(session) = self.high_quality_session.get() {
+            return Ok(session);
+        }
+        let path = self.high_quality.path(HIGH_QUALITY_MODEL[0].0);
+        if !path.exists() {
+            bail!("the High quality model isn't downloaded yet; download it on the Background tab or switch to Standard");
+        }
+        let session = load_model(&path).context("couldn't load the High quality model")?;
+        // Two first uses at once would both load it; either copy does.
+        Ok(self.high_quality_session.get_or_init(|| Mutex::new(session)))
     }
 
     /// Runs queued exports one at a time.
@@ -288,6 +351,9 @@ impl Engine {
     /// Renders the frame at `at` seconds exactly as the export would, as a JPEG (PNG when transparent).
     /// With `matte`, it's the matte itself instead: the subject white, the background black.
     pub fn preview(&self, input: &Path, at: f64, settings: Settings, matte: bool) -> Result<Preview> {
+        if settings.mode != Mode::None {
+            self.session(settings.model)?;
+        }
         let info = probe(input)?;
         let start = (at - PREVIEW_WARMUP_SECS).max(0.0);
         let mut decoder = Decoder::spawn(input, &info, Some(start), Some(at - start))?;
@@ -345,6 +411,9 @@ impl Engine {
         let alpha = mode == Mode::Remove;
         if alpha && !format.supports_alpha() {
             bail!("transparent backgrounds need ProRes or WebM");
+        }
+        if mode != Mode::None {
+            self.session(settings.model)?;
         }
         // Scaling at decode time means the whole pipeline runs at the export size.
         let info = export_info(&job.input, max_side)?;
@@ -792,6 +861,7 @@ fn encode_srgb(lut: &[u8], v: f32) -> u8 {
 struct Matting {
     /// No background effect, so the model never runs.
     skip: bool,
+    model: Model,
     layout: Layout,
     /// Model input size.
     mw: usize,
@@ -861,6 +931,7 @@ impl Matting {
         let ratio = Tensor::from_array(([1usize], vec![(512.0 / mw.max(mh) as f32).min(1.0)]))?;
         let matting = Self {
             skip: settings.mode == Mode::None,
+            model: settings.model,
             layout,
             mw,
             mh,
@@ -906,7 +977,7 @@ impl Matting {
             },
         );
 
-        let mut session = engine.session.lock().unwrap();
+        let mut session = engine.session(self.model)?.lock().unwrap();
         let mut outputs = session.run(ort::inputs! {
             "src" => TensorRef::from_array_view(([1usize, 3, mh, mw], &self.src[..]))?,
             "r1i" => &self.rec[0],
@@ -1509,7 +1580,7 @@ mod tests {
         // A black subject on a white room: the blurred room right beside it stays white.
         let (w, h) = (256, 128);
         let info = VideoInfo { width: w, height: h, fps: "30".into(), fps_value: 30.0, duration: 1.0, frames: 30, hdr: None };
-        let settings = Settings { mode: Mode::Blur, blur: 20.0, color: [0; 3], edge: 0.0, hardness: 0.0, dim: 0.0 };
+        let settings = Settings { mode: Mode::Blur, model: Model::Standard, blur: 20.0, color: [0; 3], edge: 0.0, hardness: 0.0, dim: 0.0 };
         let (_, compositor) = Matting::new(&info, settings).unwrap();
         let subject = |i: usize| (96..160).contains(&(i % w)) && (32..96).contains(&(i / w));
         let frame: Vec<u8> = (0..w * h).flat_map(|i| [if subject(i) { 0 } else { 255 }; 3]).collect();
