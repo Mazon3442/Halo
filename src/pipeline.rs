@@ -290,7 +290,7 @@ impl Engine {
     pub fn preview(&self, input: &Path, at: f64, settings: Settings, matte: bool) -> Result<Preview> {
         let info = probe(input)?;
         let start = (at - PREVIEW_WARMUP_SECS).max(0.0);
-        let mut decoder = Decoder::spawn(input, &info, settings, Some(start), Some(at - start))?;
+        let mut decoder = Decoder::spawn(input, &info, Some(start), Some(at - start))?;
         let (mut matting, compositor) = Matting::new(&info, settings)?;
         let mut stdout = decoder.stdout.take().unwrap();
         let (mut frame, mut last) = (decoder.empty_frame(), decoder.empty_frame());
@@ -351,7 +351,7 @@ impl Engine {
         let (start, duration) = job.span(&info);
         job.status.lock().unwrap().total = info.frames_in(duration);
 
-        let mut decoder = Decoder::spawn(&job.input, &info, settings, start, start.map(|_| duration))?;
+        let mut decoder = Decoder::spawn(&job.input, &info, start, start.map(|_| duration))?;
         let mut encode = tool("ffmpeg");
         encode
             .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", mode.pix_fmt()])
@@ -640,32 +640,30 @@ fn overlay(job: &Job) -> Result<()> {
 /// back up, which costs little detail but keeps 4K from moving ~100 MB per frame to and from the GPU.
 const MODEL_MAX_SIDE: usize = 1920;
 
-/// The background blur runs at 1/BLUR_SCALE resolution: a blurred image loses nothing from that,
-/// and it's ~16x less work than blurring full frames.
-const BLUR_SCALE: usize = 4;
+/// The background is blurred on a grid of cells, each this many times smaller than the blur's
+/// sigma: a blurred image loses nothing from that, and the blur costs the same however strong it is.
+const BLUR_SIGMA_IN_CELLS: f32 = 2.5;
+
+/// Smallest cell, in pixels, so light blurs aren't run at full resolution.
+const MIN_BLUR_CELL: usize = 4;
 
 /// Frames buffered between export stages, so decoding, inference and encoding overlap.
 const PIPELINE_DEPTH: usize = 2;
 
-/// Frame layout produced by the decoder: the original `w`x`h` RGB frame, followed in blur mode by
-/// `blur_h` more rows whose first `blur_w` pixels hold the small blurred background.
+/// Frame layout produced by the decoder: `w`x`h` RGB.
 #[derive(Clone, Copy)]
 struct Layout {
     w: usize,
     h: usize,
-    blur_w: usize,
-    blur_h: usize,
 }
 
 impl Layout {
-    fn new(info: &VideoInfo, mode: Mode) -> Self {
-        let (w, h) = (info.width, info.height);
-        let (blur_w, blur_h) = if mode == Mode::Blur { ((w / BLUR_SCALE).max(1), (h / BLUR_SCALE).max(1)) } else { (0, 0) };
-        Self { w, h, blur_w, blur_h }
+    fn new(info: &VideoInfo) -> Self {
+        Self { w: info.width, h: info.height }
     }
 
     fn frame_len(self) -> usize {
-        self.w * (self.h + self.blur_h) * 3
+        self.w * self.h * 3
     }
 }
 
@@ -678,20 +676,14 @@ struct Decoder {
 }
 
 impl Decoder {
-    fn spawn(input: &Path, info: &VideoInfo, settings: Settings, start: Option<f64>, duration: Option<f64>) -> Result<Self> {
-        let layout = Layout::new(info, settings.mode);
-        let Layout { w, h, blur_w, blur_h } = layout;
+    fn spawn(input: &Path, info: &VideoInfo, start: Option<f64>, duration: Option<f64>) -> Result<Self> {
+        let layout = Layout::new(info);
+        let Layout { w, h } = layout;
         // Constant frame rate so the re-muxed audio stays in sync.
         let mut vf = format!("fps={},scale={w}:{h}", info.fps);
         if let Some(hdr) = info.hdr {
             vf += ",";
             vf += hdr.filters()?.trim_end_matches(',');
-        }
-        if settings.mode == Mode::Blur {
-            let sigma = settings.blur / BLUR_SCALE as f32;
-            vf += &format!(
-                ",split[a][b];[b]scale={blur_w}:{blur_h}:flags=area,gblur=sigma={sigma},pad={w}:{blur_h}[c];[a][c]vstack"
-            );
         }
         let mut cmd = tool("ffmpeg");
         cmd.args(["-v", "error"]);
@@ -743,9 +735,14 @@ fn read_frame(stdout: &mut ChildStdout, frame: &mut [u8]) -> Result<bool> {
 /// Bilinear sampling positions for resizing a line of `from` pixels to `to` pixels:
 /// for each output pixel, the two source pixels and the weight of the second.
 fn taps(to: usize, from: usize) -> Vec<(usize, usize, f32)> {
+    taps_scaled(to, from, from as f32 / to as f32)
+}
+
+/// Like `taps`, with output pixels `scale` source pixels apart.
+fn taps_scaled(to: usize, from: usize, scale: f32) -> Vec<(usize, usize, f32)> {
     (0..to)
         .map(|i| {
-            let f = ((i as f32 + 0.5) * from as f32 / to as f32 - 0.5).clamp(0.0, (from - 1) as f32);
+            let f = ((i as f32 + 0.5) * scale - 0.5).clamp(0.0, (from - 1) as f32);
             let i0 = f as usize;
             (i0, (i0 + 1).min(from - 1), f - i0 as f32)
         })
@@ -755,6 +752,39 @@ fn taps(to: usize, from: usize) -> Vec<(usize, usize, f32)> {
 #[inline]
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
+}
+
+/// An sRGB-encoded value, 0 to 1, as linear light.
+fn srgb_to_linear(v: f32) -> f32 {
+    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+}
+
+/// Linear light for each 8-bit sRGB code value.
+fn linear_lut() -> &'static [f32; 256] {
+    static LUT: OnceLock<[f32; 256]> = OnceLock::new();
+    LUT.get_or_init(|| std::array::from_fn(|i| srgb_to_linear(i as f32 / 255.0)))
+}
+
+/// Steps in `srgb_lut`, fine enough that the darkest code values (where sRGB is steepest) don't band.
+const SRGB_STEPS: usize = 1 << 14;
+
+/// The 8-bit sRGB code value for linear light 0 to 1, in `SRGB_STEPS` steps.
+fn srgb_lut() -> &'static [u8] {
+    static LUT: OnceLock<Vec<u8>> = OnceLock::new();
+    LUT.get_or_init(|| {
+        (0..SRGB_STEPS)
+            .map(|i| {
+                let v = i as f32 / (SRGB_STEPS - 1) as f32;
+                let e = if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+                (e * 255.0 + 0.5) as u8
+            })
+            .collect()
+    })
+}
+
+#[inline]
+fn encode_srgb(lut: &[u8], v: f32) -> u8 {
+    lut[(v.clamp(0.0, 1.0) * (SRGB_STEPS - 1) as f32 + 0.5) as usize]
 }
 
 /// Per-video model state. RVM is recurrent: each frame's hidden state feeds the next,
@@ -780,16 +810,46 @@ struct Compositor {
     settings: Settings,
     layout: Layout,
     mw: usize,
-    // Matte -> frame and small blur -> frame resampling.
+    mh: usize,
+    /// The matte's ramp, from `Settings::ramp`.
+    low: f32,
+    width: f32,
+    // Matte -> frame resampling.
     up_x: Vec<(usize, usize, f32)>,
     up_y: Vec<(usize, usize, f32)>,
-    blur_x: Vec<(usize, usize, f32)>,
-    blur_y: Vec<(usize, usize, f32)>,
+    /// Set in blur mode.
+    blur: Option<BlurGrid>,
+}
+
+/// The coarse grid the background is blurred on, and how it maps back onto the frame.
+struct BlurGrid {
+    /// Cell size in frame pixels, and the grid's size in cells.
+    cell: usize,
+    cw: usize,
+    ch: usize,
+    /// The Gaussian, centre tap in the middle.
+    kernel: Vec<f32>,
+    // Grid -> frame resampling.
+    up_x: Vec<(usize, usize, f32)>,
+    up_y: Vec<(usize, usize, f32)>,
+}
+
+impl BlurGrid {
+    fn new(w: usize, h: usize, sigma: f32) -> Self {
+        // Grids under ~16 cells across would show their blockiness on tiny videos.
+        let cell = ((sigma / BLUR_SIGMA_IN_CELLS).round() as usize).max(MIN_BLUR_CELL).min((w.min(h) / 16).max(1));
+        let (cw, ch) = (w.div_ceil(cell), h.div_ceil(cell));
+        let sigma = sigma / cell as f32;
+        let radius = (3.0 * sigma).ceil() as i32;
+        let kernel = (-radius..=radius).map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp()).collect();
+        let scale = 1.0 / cell as f32;
+        Self { cell, cw, ch, kernel, up_x: taps_scaled(w, cw, scale), up_y: taps_scaled(h, ch, scale) }
+    }
 }
 
 impl Matting {
     fn new(info: &VideoInfo, settings: Settings) -> Result<(Self, Compositor)> {
-        let layout = Layout::new(info, settings.mode);
+        let layout = Layout::new(info);
         let (w, h) = (layout.w, layout.h);
         let scale = (MODEL_MAX_SIDE as f32 / w.max(h) as f32).min(1.0);
         let mw = ((w as f32 * scale).round() as usize).max(2);
@@ -799,11 +859,6 @@ impl Matting {
             .collect::<Result<_>>()?;
         // The model's internal resolution; ~512px on the long side is the recommended trade-off.
         let ratio = Tensor::from_array(([1usize], vec![(512.0 / mw.max(mh) as f32).min(1.0)]))?;
-        let (blur_x, blur_y) = if settings.mode == Mode::Blur {
-            (taps(w, layout.blur_w), taps(h, layout.blur_h))
-        } else {
-            (Vec::new(), Vec::new())
-        };
         let matting = Self {
             skip: settings.mode == Mode::None,
             layout,
@@ -815,11 +870,15 @@ impl Matting {
             down_x: taps(mw, w),
             down_y: taps(mh, h),
         };
-        let compositor = Compositor { settings, layout, mw, up_x: taps(w, mw), up_y: taps(h, mh), blur_x, blur_y };
+        let (low, width) = settings.ramp();
+        let blur = (settings.mode == Mode::Blur).then(|| BlurGrid::new(w, h, settings.blur));
+        let compositor = Compositor { settings, layout, mw, mh, low, width, up_x: taps(w, mw), up_y: taps(h, mh), blur };
         Ok((matting, compositor))
     }
 
-    /// Runs the model on one decoded frame, writing its `mw`x`mh` alpha matte into `pha`.
+    /// Runs the model on one decoded frame, writing its `mw`x`mh` alpha matte into `pha`, followed
+    /// by its estimate of the subject's colour without the background showing through, as three
+    /// planes of 0..1 sRGB.
     fn infer(&mut self, engine: &Engine, frame: &[u8], pha: &mut Vec<f32>) -> Result<()> {
         if self.skip {
             return Ok(());
@@ -858,6 +917,7 @@ impl Matting {
         })?;
         pha.clear();
         pha.extend_from_slice(outputs["pha"].try_extract_tensor::<f32>()?.1);
+        pha.extend_from_slice(outputs["fgr"].try_extract_tensor::<f32>()?.1);
         for (slot, name) in self.rec.iter_mut().zip(["r1o", "r2o", "r3o", "r4o"]) {
             *slot = outputs.remove(name).context("model output missing")?;
         }
@@ -866,75 +926,187 @@ impl Matting {
 }
 
 impl Compositor {
-    /// Blends the original frame over the new background using the (upscaled) matte `pha`.
+    /// Row `y` of the matte at the frame's size: upscaled, then shifted and hardened. `between`
+    /// holds the model's two nearest rows blended, so each pixel only blends across.
+    fn alpha_row(&self, pha: &[f32], y: usize, between: &mut Vec<f32>, alpha: &mut [f32]) {
+        let (my0, my1, ty) = self.up_y[y];
+        let (row0, row1) = (&pha[my0 * self.mw..(my0 + 1) * self.mw], &pha[my1 * self.mw..(my1 + 1) * self.mw]);
+        between.clear();
+        between.extend(row0.iter().zip(row1).map(|(&a, &b)| lerp(a, b, ty)));
+        let scale = 1.0 / self.width;
+        for (a, &(mx0, mx1, tx)) in alpha.iter_mut().zip(&self.up_x) {
+            *a = ((lerp(between[mx0], between[mx1], tx) - self.low) * scale).clamp(0.0, 1.0);
+        }
+    }
+
+    /// The subject's colour at an edge pixel, as 0..1 sRGB. The frame's own colour there still
+    /// holds some of the room behind (in hair, the sharp room itself), so as the matte thins it
+    /// gives way to the model's estimate of the subject alone.
+    fn edge_colour(&self, src: &[u8], pha: &[f32], x: usize, y: usize, a: f32) -> [f32; 3] {
+        let ((mx0, mx1, tx), (my0, my1, ty)) = (self.up_x[x], self.up_y[y]);
+        let t = ((1.0 - a) * 20.0).min(1.0);
+        std::array::from_fn(|c| {
+            let plane = &pha[(1 + c) * self.mw * self.mh..];
+            let (row0, row1) = (&plane[my0 * self.mw..], &plane[my1 * self.mw..]);
+            let fgr = lerp(lerp(row0[mx0], row0[mx1], tx), lerp(row1[mx0], row1[mx1], tx), ty);
+            lerp(src[c] as f32 / 255.0, fgr.clamp(0.0, 1.0), t)
+        })
+    }
+
+    /// The background alone, blurred, as 0..255 sRGB on the grid's cells. Each pixel counts by
+    /// how surely it's background, and the blur is divided by the blurred weights, so the subject
+    /// never smears into the blur around it and what it hides is filled in from around it.
+    fn background(&self, grid: &BlurGrid, frame: &[u8], pha: &[f32]) -> Vec<f32> {
+        let Layout { w, h } = self.layout;
+        let &BlurGrid { cell, cw, ch, ref kernel, .. } = grid;
+        let (to_linear, to_srgb) = (linear_lut(), srgb_lut());
+
+        // Each cell's weighted RGB sum and weight. In linear light, so lights keep their strength.
+        let mut sums = vec![0f32; cw * ch * 4];
+        sums.par_chunks_mut(cw * 4).enumerate().for_each_init(
+            || (Vec::new(), vec![0f32; w]),
+            |(between, alpha), (cy, sums)| {
+                for y in cy * cell..((cy + 1) * cell).min(h) {
+                    self.alpha_row(pha, y, between, alpha);
+                    let row = &frame[y * w * 3..(y + 1) * w * 3];
+                    for (cx, s) in sums.chunks_exact_mut(4).enumerate() {
+                        for x in cx * cell..((cx + 1) * cell).min(w) {
+                            // Squared, so edge pixels, partly the subject's colour, count for less. The
+                            // floor lets the subject fill in only where there's no background within reach.
+                            let weight = (1.0 - alpha[x]).powi(2) + 1e-4;
+                            for c in 0..3 {
+                                s[c] += to_linear[row[x * 3 + c] as usize] * weight;
+                            }
+                            s[3] += weight;
+                        }
+                    }
+                }
+            },
+        );
+
+        // Separable Gaussian. Beyond the frame counts as nothing, which dividing by the blurred
+        // weights accounts for.
+        let r = kernel.len() / 2;
+        let mut across = vec![0f32; cw * ch * 4];
+        across.par_chunks_mut(cw * 4).zip(sums.par_chunks(cw * 4)).for_each(|(out, row)| {
+            for x in 0..cw {
+                let mut acc = [0f32; 4];
+                for i in x.saturating_sub(r)..(x + r + 1).min(cw) {
+                    let k = kernel[i + r - x];
+                    for c in 0..4 {
+                        acc[c] += row[i * 4 + c] * k;
+                    }
+                }
+                out[x * 4..x * 4 + 4].copy_from_slice(&acc);
+            }
+        });
+        // Dim was always a scale on sRGB values; this is the same in linear light.
+        let keep = (1.0 - 0.85 * self.settings.dim.clamp(0.0, 1.0)).powf(2.2);
+        let mut background = vec![0f32; cw * ch * 3];
+        background.par_chunks_mut(cw * 3).enumerate().for_each(|(y, out)| {
+            let mut acc = vec![0f32; cw * 4];
+            for i in y.saturating_sub(r)..(y + r + 1).min(ch) {
+                let k = kernel[i + r - y];
+                for (a, v) in acc.iter_mut().zip(&across[i * cw * 4..(i + 1) * cw * 4]) {
+                    *a += v * k;
+                }
+            }
+            for (out, s) in out.chunks_exact_mut(3).zip(acc.chunks_exact(4)) {
+                for c in 0..3 {
+                    out[c] = encode_srgb(to_srgb, s[c] / s[3] * keep) as f32;
+                }
+            }
+        });
+        background
+    }
+
+    /// Blends the subject over the new background using the (upscaled) matte `pha`.
     fn composite(&self, frame: &[u8], pha: &[f32], out: &mut Vec<u8>) {
-        let Layout { w, h, .. } = self.layout;
-        let Settings { mode, color, dim, .. } = self.settings;
-        let (low, width) = self.settings.ramp();
-        let keep = 1.0 - 0.85 * dim.clamp(0.0, 1.0);
+        let Layout { w, h } = self.layout;
+        let Settings { mode, color, .. } = self.settings;
         let channels = mode.channels();
-        let mw = self.mw;
         if mode == Mode::None {
             out.clear();
             out.extend_from_slice(&frame[..w * h * 3]);
             return;
         }
-        let blur_rows = &frame[w * h * 3..];
+        let blurred = self.blur.as_ref().map(|grid| (grid, self.background(grid, frame, pha)));
         out.resize(w * h * channels, 0);
-        out.par_chunks_mut(w * channels).enumerate().for_each(|(y, out_row)| {
-            let (my0, my1, ty) = self.up_y[y];
-            let (pha0, pha1) = (&pha[my0 * mw..], &pha[my1 * mw..]);
-            let row = &frame[y * w * 3..(y + 1) * w * 3];
-            for x in 0..w {
-                let (mx0, mx1, tx) = self.up_x[x];
-                let a = lerp(lerp(pha0[mx0], pha0[mx1], tx), lerp(pha1[mx0], pha1[mx1], tx), ty);
-                let a = ((a - low) / width).clamp(0.0, 1.0);
-                let src = &row[x * 3..x * 3 + 3];
-                let dst = &mut out_row[x * channels..(x + 1) * channels];
-                match mode {
-                    Mode::None => unreachable!("handled above"),
-                    Mode::Remove => {
+        out.par_chunks_mut(w * channels).enumerate().for_each_init(
+            || (Vec::new(), vec![0f32; w], Vec::new()),
+            |(between, alpha, background_row), (y, out_row)| {
+                self.alpha_row(pha, y, between, alpha);
+                // This row's background, blended between the grid's two nearest rows.
+                if let Some((grid, background)) = &blurred {
+                    let (by0, by1, ty) = grid.up_y[y];
+                    let row = |r: usize| &background[r * grid.cw * 3..(r + 1) * grid.cw * 3];
+                    background_row.clear();
+                    background_row.extend(row(by0).iter().zip(row(by1)).map(|(&a, &b)| lerp(a, b, ty)));
+                }
+                let row = &frame[y * w * 3..(y + 1) * w * 3];
+                for x in 0..w {
+                    let a = alpha[x];
+                    let src = &row[x * 3..x * 3 + 3];
+                    let dst = &mut out_row[x * channels..(x + 1) * channels];
+                    // Fully opaque subject pixels are the frame as it is.
+                    if a >= 0.999 {
                         dst[..3].copy_from_slice(src);
-                        dst[3] = (a * 255.0 + 0.5) as u8;
-                    }
-                    Mode::Color => {
-                        for c in 0..3 {
-                            dst[c] = lerp(color[c] as f32, src[c] as f32, a) as u8;
+                        if mode == Mode::Remove {
+                            dst[3] = 255;
                         }
+                        continue;
                     }
-                    // Fully opaque subject pixels skip sampling the background.
-                    Mode::Blur if a >= 0.999 => dst.copy_from_slice(src),
-                    Mode::Blur => {
-                        let (bx0, bx1, bx) = self.blur_x[x];
-                        let (by0, by1, by) = self.blur_y[y];
-                        let (b0, b1) = (&blur_rows[by0 * w * 3..], &blur_rows[by1 * w * 3..]);
-                        for c in 0..3 {
-                            let top = lerp(b0[bx0 * 3 + c] as f32, b0[bx1 * 3 + c] as f32, bx);
-                            let bottom = lerp(b1[bx0 * 3 + c] as f32, b1[bx1 * 3 + c] as f32, bx);
-                            dst[c] = lerp(lerp(top, bottom, by) * keep, src[c] as f32, a) as u8;
+                    let edge = (a > 0.001).then(|| self.edge_colour(src, pha, x, y, a));
+                    match mode {
+                        Mode::None => unreachable!("handled above"),
+                        Mode::Remove => {
+                            match edge {
+                                Some(fg) => {
+                                    for c in 0..3 {
+                                        dst[c] = (fg[c] * 255.0 + 0.5) as u8;
+                                    }
+                                }
+                                None => dst[..3].copy_from_slice(src),
+                            }
+                            dst[3] = (a * 255.0 + 0.5) as u8;
+                        }
+                        Mode::Color => {
+                            for c in 0..3 {
+                                let fg = edge.map_or(src[c] as f32, |fg| fg[c] * 255.0);
+                                dst[c] = lerp(color[c] as f32, fg, a) as u8;
+                            }
+                        }
+                        // Mixed as the frame is encoded, not in linear light: the model learned its
+                        // mattes from pictures mixed that way, and in linear light dark hair over a
+                        // bright room would turn hazy.
+                        Mode::Blur => {
+                            let (grid, _) = blurred.as_ref().expect("blur mode has a grid");
+                            let (bx0, bx1, tx) = grid.up_x[x];
+                            for c in 0..3 {
+                                let background = lerp(background_row[bx0 * 3 + c], background_row[bx1 * 3 + c], tx);
+                                let fg = edge.map_or(src[c] as f32, |fg| fg[c] * 255.0);
+                                dst[c] = (lerp(background, fg, a) + 0.5) as u8;
+                            }
                         }
                     }
                 }
-            }
-        });
+            },
+        );
     }
 
     /// The matte as a grey picture at the frame's size, shifted and hardened as the export uses it.
     fn matte(&self, pha: &[f32], out: &mut Vec<u8>) {
-        let Layout { w, h, .. } = self.layout;
-        let (low, width) = self.settings.ramp();
-        let mw = self.mw;
+        let Layout { w, h } = self.layout;
         out.resize(w * h * 3, 0);
-        out.par_chunks_mut(w * 3).enumerate().for_each(|(y, out_row)| {
-            let (my0, my1, ty) = self.up_y[y];
-            let (pha0, pha1) = (&pha[my0 * mw..], &pha[my1 * mw..]);
-            for x in 0..w {
-                let (mx0, mx1, tx) = self.up_x[x];
-                let a = lerp(lerp(pha0[mx0], pha0[mx1], tx), lerp(pha1[mx0], pha1[mx1], tx), ty);
-                let v = (((a - low) / width).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-                out_row[x * 3..x * 3 + 3].fill(v);
-            }
-        });
+        out.par_chunks_mut(w * 3).enumerate().for_each_init(
+            || (Vec::new(), vec![0f32; w]),
+            |(between, alpha), (y, out_row)| {
+                self.alpha_row(pha, y, between, alpha);
+                for (px, a) in out_row.chunks_exact_mut(3).zip(alpha.iter()) {
+                    px.fill((a * 255.0 + 0.5) as u8);
+                }
+            },
+        );
     }
 }
 
@@ -1330,5 +1502,23 @@ mod tests {
         let grey = Hdr::Hlg.light([0.4; 3])[0];
         let shown = 1.055 * grey.powf(1.0 / 2.4) - 0.055;
         assert!((shown * 255.0 - 107.0).abs() < 1.0, "{shown}");
+    }
+
+    #[test]
+    fn blur_leaves_the_subject_out_of_the_background() {
+        // A black subject on a white room: the blurred room right beside it stays white.
+        let (w, h) = (256, 128);
+        let info = VideoInfo { width: w, height: h, fps: "30".into(), fps_value: 30.0, duration: 1.0, frames: 30, hdr: None };
+        let settings = Settings { mode: Mode::Blur, blur: 20.0, color: [0; 3], edge: 0.0, hardness: 0.0, dim: 0.0 };
+        let (_, compositor) = Matting::new(&info, settings).unwrap();
+        let subject = |i: usize| (96..160).contains(&(i % w)) && (32..96).contains(&(i / w));
+        let frame: Vec<u8> = (0..w * h).flat_map(|i| [if subject(i) { 0 } else { 255 }; 3]).collect();
+        // The model runs at the frame's size here: its matte, then its subject colour (black).
+        let mut pha: Vec<f32> = (0..w * h).map(|i| if subject(i) { 1.0 } else { 0.0 }).collect();
+        pha.resize(4 * w * h, 0.0);
+        let mut out = Vec::new();
+        compositor.composite(&frame, &pha, &mut out);
+        assert!(out[(64 * w + 94) * 3] >= 254, "{}", out[(64 * w + 94) * 3]);
+        assert_eq!(out[(64 * w + 128) * 3], 0);
     }
 }

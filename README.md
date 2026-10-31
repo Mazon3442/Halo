@@ -251,7 +251,11 @@ players read as Rec.709 and show shifted.
 
 **Exports** run as three overlapping stages: ffmpeg decoding, GPU inference, and compositing plus
 encoding. The matting model runs at up to 1920px on the long side and its matte is scaled back up. The
-background blur is computed at quarter resolution. Pixel work is spread across all CPU cores.
+background blur leaves the subject out: each pixel counts by how surely it's background, so the person
+never smears into the blur around them and what they hide is filled in from around it. It's blurred in
+linear light, so lights keep their strength, on a grid coarse enough that a strong blur costs no more
+than a light one. Edge pixels, where the frame still holds some of the room, take the model's estimate
+of the subject's colour instead. Pixel work is spread across all CPU cores.
 
 ## Build from source
 
