@@ -118,6 +118,19 @@
           </div>
           <p class="hint" id="mode-hint"></p>
         </div>
+        <div class="group" id="model-group">
+          <div class="group-title">Quality</div>
+          <div class="segmented" role="radiogroup" aria-label="Matting quality">
+            <input type="radio" name="model" id="q-standard" value="standard"><label for="q-standard">Standard</label>
+            <input type="radio" name="model" id="q-high" value="high"><label for="q-high">High</label>
+          </div>
+          <p class="hint" id="model-hint"></p>
+          <button class="btn wide" id="model-download" hidden>Download High quality</button>
+          <div id="model-downloading" hidden>
+            <p class="hint" id="model-progress-text">Starting download…</p>
+            <div class="progress" style="margin-top:8px"><div id="model-bar"></div></div>
+          </div>
+        </div>
         <div class="group" id="blur-group">
           <div class="slider-row"><label for="blur">Strength</label><input type="range" id="blur" min="4" max="60" step="1"><span class="value" id="blur-value"></span></div>
           <div class="slider-row"><label for="bg-dim">Darken</label><input type="range" id="bg-dim" min="0" max="100" step="1"><span class="value" id="bg-dim-v"></span></div>

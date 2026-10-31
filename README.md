@@ -108,11 +108,13 @@ them that way.
 
 ## Using Halo
 
-Halo reads your video in place and keeps a project per video, autosaved, so reopening a file brings its edits back. Projects, saved looks, LUTs, plugins and the speech models live in Halo's data folder: `%APPDATA%\com.mazon.halo` on Windows, `~/Library/Application Support/com.mazon.halo` on macOS, and `~/.local/share/com.mazon.halo` on Linux. Recent videos are listed on the start screen. Everything is undoable (Ctrl+Z / Ctrl+Shift+Z).
+Halo reads your video in place and keeps a project per video, autosaved, so reopening a file brings its edits back. Projects, saved looks, LUTs, plugins and downloaded models live in Halo's data folder: `%APPDATA%\com.mazon.halo` on Windows, `~/Library/Application Support/com.mazon.halo` on macOS, and `~/.local/share/com.mazon.halo` on Linux. Recent videos are listed on the start screen. Everything is undoable (Ctrl+Z / Ctrl+Shift+Z).
 
 **Background tab:** None, Blur, Remove or Color. Pause anywhere to see the effect on that frame,
-rendered with the exact model and blur the export uses; hold C to compare with the original. Blur has
-presets (Subtle, Portrait, Strong, Spotlight) and can darken the background too. Under Edges, Shift edge
+rendered with the exact model and blur the export uses; hold C to compare with the original. Quality
+picks the matting model: Standard, which comes with Halo, or High, a larger one (RVM on ResNet50, a
+one-time 107 MB download) that follows hair and fine edges more steadily and runs at about half the
+speed. Blur has presets (Subtle, Portrait, Strong, Spotlight) and can darken the background too. Under Edges, Shift edge
 pulls the matte in to trim a halo of the room around hair and shoulders (or out to keep more), and
 Hardness tightens soft, see-through edges; Show matte (Alt+M) shows the matte itself, white over black,
 to judge them.
@@ -251,7 +253,11 @@ players read as Rec.709 and show shifted.
 
 **Exports** run as three overlapping stages: ffmpeg decoding, GPU inference, and compositing plus
 encoding. The matting model runs at up to 1920px on the long side and its matte is scaled back up. The
-background blur is computed at quarter resolution. Pixel work is spread across all CPU cores.
+background blur leaves the subject out: each pixel counts by how surely it's background, so the person
+never smears into the blur around them and what they hide is filled in from around it. It's blurred in
+linear light, so lights keep their strength, on a grid coarse enough that a strong blur costs no more
+than a light one. Edge pixels, where the frame still holds some of the room, take the model's estimate
+of the subject's colour instead. Pixel work is spread across all CPU cores.
 
 ## Build from source
 
@@ -331,7 +337,8 @@ without the right-click.
 
 Halo has no accounts and no telemetry. Your videos, captions and projects stay on your computer, and
 all processing runs on it. Halo connects to the internet only to check GitHub for a new version when
-it starts, and to download the speech models from Hugging Face the first time you generate captions.
+it starts, to download the speech models from Hugging Face the first time you generate captions, and
+to download the High quality background model from GitHub if you choose it.
 Those services see the usual request details, such as your IP address.
 
 ## License

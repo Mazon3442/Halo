@@ -29,6 +29,11 @@ const MODE_HINTS = {
   color: "Puts a solid color behind you, like a green screen.",
 };
 
+const MODEL_HINTS = {
+  standard: "Fast, and right for most videos.",
+  high: "A larger model that follows hair and fine edges more steadily. Previews and exports take longer.",
+};
+
 // The window never scrolls, only the panels in it do. The browser still scrolls it to show a focused
 // control it thinks is out of view, which shoves the whole layout up, so that's undone at once.
 window.addEventListener("scroll", () => { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); });
@@ -271,7 +276,7 @@ async function openPath(path) {
   doc.captions.style = normalizeStyle(doc.captions.style);
   doc.captions.overrides ??= {};
   doc.grade ??= { sections: [], nextId: 1 };
-  doc.background = { edge: 0, hardness: 0, dim: 0, ...doc.background };
+  doc.background = { edge: 0, hardness: 0, dim: 0, model: "standard", ...doc.background };
   doc.markers ??= [];
   doc.range ??= null;
   media = opened;
@@ -336,6 +341,7 @@ function setTab(name) {
   $("panel-color").hidden = name !== "color";
   inspector.setVisible(name === "captions" && !!store.doc);
   if (name === "captions") refreshSpeech();
+  if (name === "background") refreshMatting();
   updateEffect();
   if (name === "color") color.render();
   rememberView();
@@ -365,6 +371,8 @@ function render() {
   if (bg.mode === "none") matteView = false;
   for (const r of document.querySelectorAll("input[name=mode]")) r.checked = r.value === bg.mode;
   $("mode-hint").textContent = MODE_HINTS[bg.mode];
+  $("model-group").hidden = bg.mode === "none";
+  renderModel();
   $("blur-group").hidden = bg.mode !== "blur";
   $("color-group").hidden = bg.mode !== "color";
   $("preview-note").hidden = bg.mode === "none";
@@ -433,8 +441,76 @@ editableValue($("blur-value"), $("blur"));
 for (const c of document.querySelectorAll("[data-blur]")) {
   c.addEventListener("click", () => store.update((d) => { d.background.blur = Number(c.dataset.blur); d.background.dim = Number(c.dataset.dim) / 100; }));
 }
+for (const r of document.querySelectorAll("input[name=model]")) {
+  r.addEventListener("change", () => {
+    if (r.value === "high") chooseHigh();
+    else store.update((d) => (d.background.model = "standard"));
+  });
+}
+$("model-download").addEventListener("click", chooseHigh);
 $("edge-reset").addEventListener("click", () => store.update((d) => { d.background.edge = 0; d.background.hardness = 0; }));
 $("matte-view").addEventListener("click", () => setMatteView(!matteView));
+
+/* ---------- High quality matting model ---------- */
+
+/** The High quality model's download, as the engine last reported it (null until asked). */
+let highModel = null;
+/** Set when High was chosen before its model was here: it's switched to once the download finishes. */
+let wantHigh = false;
+
+async function refreshMatting() {
+  try { highModel = await api.get("/matting"); } catch { return; }
+  if (highModel.state === "ready" && wantHigh) {
+    wantHigh = false;
+    // Already set to High (a project from another computer), the preview just has to try again.
+    if (store.doc?.background.model === "high") scheduleEffect(0);
+    else if (store.doc) store.update((d) => (d.background.model = "high"));
+  }
+  if (highModel.state === "failed") wantHigh = false;
+  renderModel();
+  if (highModel.state === "downloading") setTimeout(refreshMatting, 500);
+}
+
+/** Switches to High, downloading its model first when it isn't on this computer yet. */
+async function chooseHigh() {
+  if (highModel?.state === "ready") {
+    store.update((d) => (d.background.model = "high"));
+    return;
+  }
+  wantHigh = true;
+  try { highModel = await api.post("/matting/download"); } catch (err) { toast(err.message); }
+  refreshMatting();
+}
+
+function renderModel() {
+  const bg = store.doc?.background;
+  if (!bg) return;
+  const model = bg.model ?? "standard";
+  const state = highModel?.state;
+  // Until the download finishes, Standard stays chosen and is what the preview shows.
+  for (const r of document.querySelectorAll("input[name=model]")) r.checked = r.value === model;
+  const missing = model === "high" && state === "missing";
+  const hint = $("model-hint");
+  hint.classList.toggle("error", state === "failed");
+  hint.classList.toggle("warn", missing);
+  hint.textContent = state === "failed"
+    ? `The download didn't finish: ${highModel.error}`
+    : missing
+      ? "The High quality model isn't on this computer yet. Download it (107 MB), or switch to Standard."
+      : state === "downloading" && wantHigh
+        ? "High quality needs a one-time download. It's switched on when the download finishes."
+        : MODEL_HINTS[model];
+  $("model-download").hidden = !(state === "failed" || missing);
+  $("model-download").textContent = state === "failed" ? "Try again" : "Download High quality";
+  $("model-downloading").hidden = state !== "downloading";
+  if (state === "downloading") {
+    const { received, total } = highModel;
+    $("model-bar").style.width = `${total ? (received / total) * 100 : 0}%`;
+    $("model-progress-text").textContent = total
+      ? `Downloading the High quality model · ${Math.round(received / 1e6)} of ${Math.round(total / 1e6)} MB`
+      : "Starting download…";
+  }
+}
 
 /** Shows the matte instead of the result, to judge the edges, like a keyer's matte view. */
 let matteView = false;
@@ -514,7 +590,7 @@ async function requestEffect() {
   const bg = store.doc.background;
   const t = video.currentTime;
   const params = new URLSearchParams({
-    t: t.toFixed(3), mode: bg.mode, blur: bg.blur, color: bg.color, edge: bg.edge ?? 0, hardness: bg.hardness ?? 0, dim: bg.dim ?? 0,
+    t: t.toFixed(3), mode: bg.mode, model: bg.model ?? "standard", blur: bg.blur, color: bg.color, edge: bg.edge ?? 0, hardness: bg.hardness ?? 0, dim: bg.dim ?? 0,
     ...(matteView ? { view: "matte" } : {}),
   });
   badge(matteView ? "Rendering the matte…" : "Rendering effect…", true);
